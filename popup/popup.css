@@ -1,0 +1,6 @@
+
+body{margin:0;font:14px system-ui;background:#0f1115;color:#e9edf1}
+.wrap{padding:12px;min-width:220px}
+h3{margin:0 0 8px 0}
+.tip{margin:0 0 12px 0; color:#9aa4b2}
+.btn{display:inline-block;padding:8px 12px;border-radius:10px;background:#00BCD4;color:#000;text-decoration:none;font-weight:700;cursor:pointer}

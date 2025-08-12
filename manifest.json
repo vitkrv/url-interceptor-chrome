@@ -1,0 +1,29 @@
+{
+  "manifest_version": 3,
+  "name": "URL Interceptor & Redirector (Rules)",
+  "version": "1.0.0",
+  "description": "Intercept and redirect URLs using Exact / Regex / Contain rules. Includes logging, import/export, and a global enable toggle.",
+  "permissions": [
+    "declarativeNetRequest",
+    "declarativeNetRequestFeedback",
+    "storage"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "action": {
+    "default_title": "URL Interceptor & Redirector",
+    "default_popup": "popup/popup.html"
+  },
+  "background": {
+    "service_worker": "background/service-worker.js",
+    "type": "module"
+  },
+  "options_page": "options/index.html",
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}

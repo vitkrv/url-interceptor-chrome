@@ -1,0 +1,100 @@
+
+:root{
+  --c-cyan:#00BCD4;
+  --c-orange:#FF9800;
+  --c-bg:#0f1115;
+  --c-card:#151922;
+  --c-text:#e9edf1;
+  --c-muted:#9aa4b2;
+  --c-danger:#ff5252;
+  --radius:16px;
+  --gap:16px;
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{
+  margin:0;
+  font: 14px/1.4 system-ui, -apple-system, Segoe UI, Roboto, Ubuntu;
+  color:var(--c-text);
+  background:linear-gradient(120deg,#0b0e13,#10151d 50%, #0d1016);
+}
+.topbar{
+  display:flex; align-items:center; justify-content:space-between;
+  padding:12px 16px; border-bottom:1px solid rgba(255,255,255,0.06);
+  position:sticky; top:0; background:#0f1115; z-index:3;
+}
+.brand{display:flex; align-items:center; gap:12px}
+.logo{width:34px; height:34px; border:2px solid var(--c-cyan); border-radius:10px}
+.titles h1{margin:0; font-size:18px}
+.titles span{font-size:12px; color:var(--c-muted)}
+.actions{display:flex; align-items:center; gap:10px}
+.container{display:grid; grid-template-columns: 1fr; gap:var(--gap); padding:var(--gap)}
+@media(min-width: 980px){ .container{ grid-template-columns: 300px 1fr; } }
+.card{
+  background:var(--c-card); border:1px solid rgba(255,255,255,.06);
+  border-radius:var(--radius); padding:16px; box-shadow:0 6px 20px rgba(0,0,0,.2);
+}
+.rules h2{margin:0 0 12px 0}
+.list{display:flex; flex-direction:column; gap:10px}
+.item{
+  display:grid; grid-template-columns: auto 1fr auto; gap:10px; align-items:center;
+  padding:12px; border-radius:12px; border:1px solid rgba(255,255,255,.06);
+  background: rgba(255,255,255,0.02);
+}
+.item .name{font-weight:600}
+.item .meta{font-size:12px; color:var(--c-muted)}
+.row{display:flex; gap:10px; align-items:center}
+.btn{
+  border:none; padding:10px 14px; border-radius:12px; cursor:pointer;
+  background:linear-gradient(135deg, var(--c-cyan), var(--c-orange));
+  color:#000; font-weight:700; box-shadow:0 6px 16px rgba(0,0,0,.25);
+}
+.btn:hover{filter:brightness(1.05)}
+.btn:disabled{opacity:.6; cursor:not-allowed}
+.btn.text{background:transparent; color:var(--c-text); border:1px solid transparent}
+.btn.outlined{background:transparent; color:var(--c-text); border:1px solid rgba(255,255,255,.2)}
+.btn.danger{background: linear-gradient(135deg, var(--c-danger), #ffbb00)}
+
+.file-label{position:relative; overflow:hidden}
+.file-label input{position:absolute; inset:0; opacity:0; cursor:pointer}
+
+.switch{position:relative; display:inline-block; width:46px; height:26px}
+.switch input{opacity:0; width:0; height:0}
+.slider{
+  position:absolute; cursor:pointer; inset:0; background:#444;
+  border-radius:26px; transition:.2s;
+}
+.slider:before{
+  content:""; position:absolute; height:20px; width:20px; left:3px; top:3px;
+  background:white; border-radius:50%; transition:.2s;
+}
+.switch input:checked + .slider{ background: var(--c-cyan); }
+.switch input:checked + .slider:before{ transform: translateX(20px); }
+
+.modal{ border:0; border-radius:16px; background:var(--c-card); color:var(--c-text); width:min(720px, 96vw); }
+.modal-lg{ width:min(980px, 96vw); }
+.modal::backdrop{ background: rgba(0,0,0,.6); }
+.modal .field{display:flex; flex-direction:column; margin:8px 0}
+.modal .field input, .modal .field select{
+  background:#10141c; color:var(--c-text); border:1px solid rgba(255,255,255,.12);
+  border-radius:10px; padding:10px 12px; outline:none;
+}
+.modal .hint{margin-top:6px; color:var(--c-muted)}
+
+.modal-actions{ display:flex; gap:8px; justify-content:flex-end; margin-top:10px }
+
+.badge{
+  padding:4px 8px; border-radius:999px; font-size:11px; background:#223; color:#9ad;
+  border:1px solid rgba(255,255,255,.12)
+}
+.badge.orange{ background:#2a1b08; color:#ffb86b; }
+.badge.cyan{ background:#08242a; color:#7ee7f3; }
+.badge.gray{ background:#1c1f26; color:#bbc6d4; }
+
+.source, .dest{ font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace; font-size:12px }
+
+.logs{ max-height: 60vh; overflow:auto; white-space: pre-wrap; background:#0f131a; border:1px solid rgba(255,255,255,.08); border-radius:12px; padding:10px }
+.logs-header{ display:flex; align-items:center; gap:10px; padding:6px 2px }
+
+.small{ font-size:12px; color:var(--c-muted) }
+.spacer{ flex:1 }
