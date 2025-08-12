@@ -9,7 +9,7 @@
  * {
  *   id: string,        // uuid-like
  *   name: string,      // <= 80 chars
- *   mode: "exact" | "regex" | "contain",
+ *   mode: "exact" | "wildcard" | "contain",
  *   source: string,
  *   destination: string,
  *   enabled: boolean
@@ -75,29 +75,17 @@ async function toDnrRule(rule, dnrId) {
     // Validate regex support
     const ok = await chrome.declarativeNetRequest.isRegexSupported({ regex: expr }).catch(() => ({ isSupported: false }));
     if (!ok || ok.isSupported === false) return null;
-  } else if (rule.mode === "regex") {
-    // Use RE2-compatible regex. If the destination doesn't reference
-    // capture groups, convert any "(" to "(?:" to avoid unsupported
-    // capturing groups in regexFilter.
-    let expr = rule.source;
-    const usesBackRef = /\\\d/.test(rule.destination);
-    if (!usesBackRef) {
-      expr = expr.replace(/\((?!\?)/g, "(?:");
-    }
+  } else if (rule.mode === "wildcard") {
+    // Convert wildcard pattern where "*" matches any characters
+    const expr = "^" + rule.source.split("*").map(escapeRegex).join(".*") + "$";
     const support = await chrome.declarativeNetRequest
       .isRegexSupported({ regex: expr })
       .catch(() => ({ isSupported: false }));
     if (!support || support.isSupported === false) {
-      return null; // invalid regex for DNR
+      return null;
     }
     condition.regexFilter = expr;
-
-    // Support capture groups via regexSubstitution; users can use \1, \2 etc. in destination
-    if (usesBackRef) {
-      action.redirect = { regexSubstitution: rule.destination };
-    } else {
-      action.redirect = { url: rule.destination };
-    }
+    action.redirect = { url: rule.destination };
   } else {
     return null;
   }
@@ -245,7 +233,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         sendResponse({ ok: false, error: "Name exceeds 80 characters" });
         return;
       }
-      if (!["exact", "regex", "contain"].includes(r.mode)) r.mode = "exact";
+      if (!["exact", "wildcard", "contain"].includes(r.mode)) r.mode = "exact";
       if (typeof r.enabled !== "boolean") r.enabled = true;
 
       if (r.id) {
@@ -307,7 +295,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           name: String(r.name).slice(0, 80),
           source: String(r.source),
           destination: String(r.destination),
-          mode: ["exact", "regex", "contain"].includes(r.mode) ? r.mode : "exact",
+          mode: ["exact", "wildcard", "contain"].includes(r.mode) ? r.mode : "exact",
           enabled: typeof r.enabled === "boolean" ? r.enabled : true
         });
       }
