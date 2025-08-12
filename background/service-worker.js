@@ -189,7 +189,7 @@ chrome.declarativeNetRequest.onRuleMatchedDebug.addListener(async (info) => {
     const ts = new Date().toISOString();
     const pageUrl = info.request.url;
 
-    logs.push(`[${ts}] on page [${pageUrl}] rule [${matchedRule.name}] applied`);
+    logs.push({ time: ts, info: `on page [${pageUrl}] rule [${matchedRule.name}] applied` });
     while (logs.length > LOG_LIMIT) logs.shift();
 
     await setState({ [STORAGE_KEYS.LOGS]: logs });

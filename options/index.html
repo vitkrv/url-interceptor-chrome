@@ -34,7 +34,7 @@
     <main class="container">
       <section class="controls card">
         <div class="row">
-          <button id="btnNew" class="btn">+ New Rule</button>
+          <button id="btnNew" class="btn">Create Rule</button>
         </div>
       </section>
 
@@ -46,8 +46,8 @@
 
     <!-- Rule Modal -->
     <dialog id="ruleModal" class="modal">
-      <form method="dialog" id="ruleForm">
-        <h3 id="ruleModalTitle">New Rule</h3>
+        <form method="dialog" id="ruleForm">
+          <h3 id="ruleModalTitle">Create Rule</h3>
 
         <label class="field">
           <span>Name (≤80)</span>
@@ -80,7 +80,7 @@
         </div>
 
         <div class="modal-actions">
-          <button value="cancel" class="btn text">Cancel</button>
+          <button id="btnCancelRule" value="cancel" class="btn text">Cancel</button>
           <button id="btnSaveRule" class="btn">Save</button>
         </div>
         <input type="hidden" id="ruleId">

@@ -37,12 +37,16 @@ body{
 .rules h2{margin:0 0 12px 0}
 .list{display:flex; flex-direction:column; gap:10px}
 .item{
-  display:grid; grid-template-columns: auto 1fr auto; gap:10px; align-items:center;
-  padding:12px; border-radius:12px; border:1px solid rgba(255,255,255,.06);
+  display:flex; flex-direction:column; gap:12px;
+  padding:16px; border-radius:12px; border:1px solid rgba(255,255,255,.06);
   background: rgba(255,255,255,0.02);
+  font-size:16px;
 }
-.item .name{font-weight:600}
-.item .meta{font-size:12px; color:var(--c-muted)}
+.item-row{display:flex; justify-content:space-between; align-items:center}
+.item .name{font-weight:600; font-size:16px}
+.item .meta{font-size:14px; color:var(--c-muted)}
+.item .source, .item .dest{ font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace; font-size:14px }
+.item .urls{display:flex; gap:6px; align-items:center; justify-content:flex-start}
 .row{display:flex; gap:10px; align-items:center}
 .btn{
   border:none; padding:10px 14px; border-radius:12px; cursor:pointer;
@@ -91,9 +95,13 @@ body{
 .badge.cyan{ background:#08242a; color:#7ee7f3; }
 .badge.gray{ background:#1c1f26; color:#bbc6d4; }
 
-.source, .dest{ font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace; font-size:12px }
-
-.logs{ max-height: 60vh; overflow:auto; white-space: pre-wrap; background:#0f131a; border:1px solid rgba(255,255,255,.08); border-radius:12px; padding:10px }
+#btnNew{ font-size:42px; padding:30px 42px }
+#logsModal{ min-height:360px }
+.logs{ max-height: 60vh; overflow:auto; background:#0f131a; border:1px solid rgba(255,255,255,.08); border-radius:12px; padding:10px; display:flex; flex-direction:column; gap:4px }
+.log-row{ display:grid; grid-template-columns:140px 1fr; gap:8px; padding:4px 0; border-bottom:1px solid rgba(255,255,255,0.06) }
+.log-row:last-child{ border-bottom:0 }
+.log-time{ font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace; font-size:12px; color:var(--c-muted) }
+.log-info{ font-size:14px }
 .logs-header{ display:flex; align-items:center; gap:10px; padding:6px 2px }
 
 .small{ font-size:12px; color:var(--c-muted) }
