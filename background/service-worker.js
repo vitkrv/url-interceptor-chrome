@@ -76,16 +76,24 @@ async function toDnrRule(rule, dnrId) {
     const ok = await chrome.declarativeNetRequest.isRegexSupported({ regex: expr }).catch(() => ({ isSupported: false }));
     if (!ok || ok.isSupported === false) return null;
   } else if (rule.mode === "regex") {
-    // Use RE2-compatible regex. We also allow capture groups.
-    const expr = rule.source;
-    const support = await chrome.declarativeNetRequest.isRegexSupported({ regex: expr }).catch(() => ({ isSupported: false }));
+    // Use RE2-compatible regex. If the destination doesn't reference
+    // capture groups, convert any "(" to "(?:" to avoid unsupported
+    // capturing groups in regexFilter.
+    let expr = rule.source;
+    const usesBackRef = /\\\d/.test(rule.destination);
+    if (!usesBackRef) {
+      expr = expr.replace(/\((?!\?)/g, "(?:");
+    }
+    const support = await chrome.declarativeNetRequest
+      .isRegexSupported({ regex: expr })
+      .catch(() => ({ isSupported: false }));
     if (!support || support.isSupported === false) {
       return null; // invalid regex for DNR
     }
     condition.regexFilter = expr;
 
     // Support capture groups via regexSubstitution; users can use \1, \2 etc. in destination
-    if (/\\\d/.test(rule.destination)) {
+    if (usesBackRef) {
       action.redirect = { regexSubstitution: rule.destination };
     } else {
       action.redirect = { url: rule.destination };
