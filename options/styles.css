@@ -24,7 +24,7 @@ body{
   position:sticky; top:0; background:#0f1115; z-index:3;
 }
 .brand{display:flex; align-items:center; gap:12px}
-.logo{width:34px; height:34px; border:2px solid var(--c-cyan); border-radius:10px}
+.logo{width:34px; height:34px; border:2px solid var(--c-cyan); border-radius:10px; background:url('../icons/icon128.png') center/cover no-repeat}
 .titles h1{margin:0; font-size:18px}
 .titles span{font-size:12px; color:var(--c-muted)}
 .actions{display:flex; align-items:center; gap:10px}
