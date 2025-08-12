@@ -202,7 +202,8 @@ chrome.declarativeNetRequest.onRuleMatchedDebug.addListener(async (info) => {
 // Messages from options UI
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   (async () => {
-    if (msg && msg.type === "get-state") {
+    try {
+      if (msg && msg.type === "get-state") {
       const state = await getState();
       sendResponse({
         rules: state[STORAGE_KEYS.RULES] || [],
@@ -328,6 +329,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     }
 
     sendResponse({ ok: false, error: "Unknown message" });
+    } catch (e) {
+      sendResponse({ ok: false, error: e && e.message ? e.message : String(e) });
+    }
   })();
   return true; // keep channel open for async sendResponse
 });

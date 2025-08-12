@@ -57,7 +57,14 @@ function isValidHttpUrl(str) {
 
 function sendMessage(payload) {
   return new Promise((resolve) => {
-    chrome.runtime.sendMessage(payload, (resp) => resolve(resp));
+    chrome.runtime.sendMessage(payload, (resp) => {
+      // Access runtime.lastError to avoid "Unchecked runtime.lastError" warnings
+      if (chrome.runtime.lastError) {
+        resolve(undefined);
+        return;
+      }
+      resolve(resp);
+    });
   });
 }
 
