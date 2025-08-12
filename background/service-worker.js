@@ -117,12 +117,8 @@ async function rebuildDnrRules() {
 
   // Build new set
   const add = [];
-  const removeIds = [];
   const existing = await chrome.declarativeNetRequest.getDynamicRules();
-  const existingIds = new Set(existing.map(r => r.id));
-
-  // Keep a set of ids that should remain
-  const keepIds = new Set();
+  const removeIds = existing.map(r => r.id);
 
   for (const r of rules) {
     if (!r.enabled) continue;
@@ -139,16 +135,10 @@ async function rebuildDnrRules() {
     const dnrRule = await toDnrRule(r, dnrId);
     if (dnrRule) {
       add.push(dnrRule);
-      keepIds.add(dnrId);
     } else {
-      // couldn't transform this rule -> ensure it's not active
-      if (existingIds.has(dnrId)) removeIds.push(dnrId);
+      // rule invalid; drop its mapping so ids can be reused
+      delete idMap[r.id];
     }
-  }
-
-  // Remove any existing ids not in keep set
-  for (const id of existingIds) {
-    if (!keepIds.has(id)) removeIds.push(id);
   }
 
   // Commit storage changes (idMap / next id) before updating rules
@@ -157,7 +147,7 @@ async function rebuildDnrRules() {
     [STORAGE_KEYS.NEXT_DNR_ID]: state[STORAGE_KEYS.NEXT_DNR_ID]
   });
 
-  // Update dynamic rules
+  // Replace existing dynamic rules entirely to avoid duplicate IDs
   await chrome.declarativeNetRequest.updateDynamicRules({
     removeRuleIds: removeIds,
     addRules: add

@@ -51,12 +51,12 @@
 
         <label class="field">
           <span>Name (≤80)</span>
-          <input type="text" id="name" maxlength="80" required>
+          <input type="text" id="name" name="name" maxlength="80" required>
         </label>
 
         <label class="field">
           <span>Mode</span>
-          <select id="mode">
+          <select id="mode" name="mode">
             <option value="exact">Exact match</option>
             <option value="wildcard">Wildcard (*)</option>
             <option value="contain">Contain</option>
@@ -65,12 +65,12 @@
 
         <label class="field">
           <span>Source URL / Pattern</span>
-          <input type="text" id="source" required placeholder="e.g., https://example.com/*/a">
+          <input type="text" id="source" name="source" required placeholder="e.g., https://example.com/*/a">
         </label>
 
         <label class="field">
           <span>Destination URL</span>
-          <input type="text" id="destination" required placeholder="e.g., https://target.com/b">
+          <input type="text" id="destination" name="destination" required placeholder="e.g., https://target.com/b">
         </label>
 
         <div class="hint small">
@@ -83,7 +83,7 @@
           <button id="btnCancelRule" value="cancel" class="btn text">Cancel</button>
           <button id="btnSaveRule" class="btn">Save</button>
         </div>
-        <input type="hidden" id="ruleId">
+        <input type="hidden" id="ruleId" name="ruleId">
       </form>
     </dialog>
 
