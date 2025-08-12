@@ -46,6 +46,15 @@ function clearRuleErrors() {
   });
 });
 
+function isValidHttpUrl(str) {
+  try {
+    const u = new URL(str);
+    return u.protocol === 'http:' || u.protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
 function sendMessage(payload) {
   return new Promise((resolve) => {
     chrome.runtime.sendMessage(payload, (resp) => resolve(resp));
@@ -184,6 +193,8 @@ els.ruleForm.addEventListener('submit', async (e) => {
   if (rule.name && rule.name.length > 80) errors.name = 'Name exceeds 80 characters';
   if (!rule.source) errors.source = 'Source is required';
   if (!rule.destination) errors.destination = 'Destination is required';
+  if (rule.source && !isValidHttpUrl(rule.source)) errors.source = 'Invalid URL';
+  if (rule.destination && !isValidHttpUrl(rule.destination)) errors.destination = 'Invalid URL';
   if (Object.keys(errors).length) {
     if (errors.name) els.nameError.textContent = errors.name;
     if (errors.source) els.sourceError.textContent = errors.source;
@@ -192,10 +203,18 @@ els.ruleForm.addEventListener('submit', async (e) => {
   }
   const resp = await sendMessage({ type: 'save-rule', rule });
   if (!resp || !resp.ok) {
-    if (resp && resp.error === 'Name exceeds 80 characters') {
-      els.nameError.textContent = resp.error;
+    if (resp) {
+      if (resp.error === 'Name exceeds 80 characters') {
+        els.nameError.textContent = resp.error;
+      } else if (resp.error === 'Source must be a valid URL') {
+        els.sourceError.textContent = resp.error;
+      } else if (resp.error === 'Destination must be a valid URL') {
+        els.destinationError.textContent = resp.error;
+      } else {
+        alert('Failed to save rule: ' + resp.error);
+      }
     } else {
-      alert('Failed to save rule: ' + (resp && resp.error || 'unknown error'));
+      alert('Failed to save rule: unknown error');
     }
     return;
   }

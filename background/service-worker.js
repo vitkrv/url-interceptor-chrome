@@ -48,6 +48,15 @@ function escapeRegex(s) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+function isValidHttpUrl(str) {
+  try {
+    const u = new URL(str);
+    return u.protocol === 'http:' || u.protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
 // Build a DNR rule (or return null if unsupported/invalid)
 async function toDnrRule(rule, dnrId) {
   const action = {
@@ -212,7 +221,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
     if (msg && msg.type === "save-rule") {
       const state = await getState();
-      const rules = state[STORAGE_KEYS.RULES] || [];
+      const current = state[STORAGE_KEYS.RULES] || [];
       const r = msg.rule;
       // Basic validation
       if (!r || !r.name || !r.source || !r.destination) {
@@ -223,9 +232,18 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         sendResponse({ ok: false, error: "Name exceeds 80 characters" });
         return;
       }
+      if (!isValidHttpUrl(r.source)) {
+        sendResponse({ ok: false, error: "Source must be a valid URL" });
+        return;
+      }
+      if (!isValidHttpUrl(r.destination)) {
+        sendResponse({ ok: false, error: "Destination must be a valid URL" });
+        return;
+      }
       if (!["exact", "wildcard", "contain"].includes(r.mode)) r.mode = "exact";
       if (typeof r.enabled !== "boolean") r.enabled = true;
 
+      const rules = current.slice();
       if (r.id) {
         const idx = rules.findIndex(x => x.id === r.id);
         if (idx >= 0) rules[idx] = r;
@@ -234,9 +252,15 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         r.id = crypto.randomUUID();
         rules.push(r);
       }
-      await setState({ [STORAGE_KEYS.RULES]: rules });
-      await rebuildDnrRules();
-      sendResponse({ ok: true, rule: r });
+      const prev = current.slice();
+      try {
+        await setState({ [STORAGE_KEYS.RULES]: rules });
+        await rebuildDnrRules();
+        sendResponse({ ok: true, rule: r });
+      } catch (e) {
+        await setState({ [STORAGE_KEYS.RULES]: prev });
+        sendResponse({ ok: false, error: e && e.message ? e.message : String(e) });
+      }
       return;
     }
 
