@@ -18,6 +18,9 @@ const els = {
   mode: document.getElementById('mode'),
   source: document.getElementById('source'),
   destination: document.getElementById('destination'),
+  nameError: document.getElementById('nameError'),
+  sourceError: document.getElementById('sourceError'),
+  destinationError: document.getElementById('destinationError'),
   ruleId: document.getElementById('ruleId'),
   btnCancelRule: document.getElementById('btnCancelRule'),
   confirmModal: document.getElementById('confirmModal'),
@@ -30,6 +33,18 @@ let rules = [];
 let logs = [];
 let globalEnabled = true;
 let pendingDeleteId = null;
+
+function clearRuleErrors() {
+  els.nameError.textContent = '';
+  els.sourceError.textContent = '';
+  els.destinationError.textContent = '';
+}
+
+['name', 'source', 'destination'].forEach((id) => {
+  els[id].addEventListener('input', () => {
+    els[id + 'Error'].textContent = '';
+  });
+});
 
 function sendMessage(payload) {
   return new Promise((resolve) => {
@@ -64,6 +79,7 @@ function renderRules() {
   for (const r of rules) {
     const item = document.createElement('div');
     item.className = 'item';
+    if (!r.enabled) item.classList.add('disabled');
 
     const top = document.createElement('div');
     top.className = 'item-row';
@@ -117,6 +133,7 @@ function renderRules() {
 }
 
 function openRuleModal(existing) {
+  clearRuleErrors();
   if (existing) {
     els.ruleModalTitle.textContent = 'Edit Rule';
     els.name.value = existing.name;
@@ -153,6 +170,7 @@ els.btnYes.addEventListener('click', async () => {
 
 els.ruleForm.addEventListener('submit', async (e) => {
   e.preventDefault();
+  clearRuleErrors();
   const rule = {
     id: els.ruleId.value || undefined,
     name: els.name.value.trim(),
@@ -161,9 +179,24 @@ els.ruleForm.addEventListener('submit', async (e) => {
     destination: els.destination.value.trim(),
     enabled: true
   };
+  const errors = {};
+  if (!rule.name) errors.name = 'Name is required';
+  if (rule.name && rule.name.length > 80) errors.name = 'Name exceeds 80 characters';
+  if (!rule.source) errors.source = 'Source is required';
+  if (!rule.destination) errors.destination = 'Destination is required';
+  if (Object.keys(errors).length) {
+    if (errors.name) els.nameError.textContent = errors.name;
+    if (errors.source) els.sourceError.textContent = errors.source;
+    if (errors.destination) els.destinationError.textContent = errors.destination;
+    return;
+  }
   const resp = await sendMessage({ type: 'save-rule', rule });
   if (!resp || !resp.ok) {
-    alert('Failed to save rule: ' + (resp && resp.error || 'unknown error'));
+    if (resp && resp.error === 'Name exceeds 80 characters') {
+      els.nameError.textContent = resp.error;
+    } else {
+      alert('Failed to save rule: ' + (resp && resp.error || 'unknown error'));
+    }
     return;
   }
   await refresh();

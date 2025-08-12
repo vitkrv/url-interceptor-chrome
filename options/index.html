@@ -52,6 +52,7 @@
         <label class="field">
           <span>Name (≤80)</span>
           <input type="text" id="name" name="name" maxlength="80" required>
+          <div class="error" id="nameError"></div>
         </label>
 
         <label class="field">
@@ -66,11 +67,13 @@
         <label class="field">
           <span>Source URL / Pattern</span>
           <input type="text" id="source" name="source" required placeholder="e.g., https://example.com/*/a">
+          <div class="error" id="sourceError"></div>
         </label>
 
         <label class="field">
           <span>Destination URL</span>
           <input type="text" id="destination" name="destination" required placeholder="e.g., https://target.com/b">
+          <div class="error" id="destinationError"></div>
         </label>
 
         <div class="hint small">

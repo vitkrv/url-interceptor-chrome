@@ -42,12 +42,14 @@ body{
   background: rgba(255,255,255,0.02);
   font-size:16px;
 }
+.item.disabled{ background: rgba(255,0,0,0.05); }
 .item-row{display:flex; justify-content:space-between; align-items:center}
 .item .name{font-weight:600; font-size:16px}
-.item .meta{font-size:14px; color:var(--c-muted)}
+.item .meta{font-size:14px; color:var(--c-muted); margin-top:6px}
 .item .source, .item .dest{ font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace; font-size:14px }
 .item .urls{display:flex; gap:6px; align-items:center; justify-content:flex-start}
 .row{display:flex; gap:10px; align-items:center}
+.item .btn{ font-size:21px; padding:15px 21px; border-radius:18px }
 .btn{
   border:none; padding:10px 14px; border-radius:12px; cursor:pointer;
   background:linear-gradient(135deg, var(--c-cyan), var(--c-orange));
@@ -83,6 +85,7 @@ body{
   background:#10141c; color:var(--c-text); border:1px solid rgba(255,255,255,.12);
   border-radius:10px; padding:10px 12px; outline:none;
 }
+.error{ color:var(--c-danger); font-size:12px; margin-top:4px }
 .modal .hint{margin-top:6px; color:var(--c-muted)}
 
 .modal-actions{ display:flex; gap:8px; justify-content:flex-end; margin-top:10px }
