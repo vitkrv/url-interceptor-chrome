@@ -46,7 +46,7 @@ async function refresh() {
 }
 
 function ruleBadge(mode) {
-  if (mode === 'regex') return '<span class="badge cyan">Regex</span>';
+  if (mode === 'wildcard') return '<span class="badge cyan">Wildcard</span>';
   if (mode === 'contain') return '<span class="badge orange">Contain</span>';
   return '<span class="badge gray">Exact</span>';
 }

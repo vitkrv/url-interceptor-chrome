@@ -2,13 +2,13 @@
 # URL Interceptor & Redirector (MV3)
 
 A Chrome extension that intercepts and redirects URLs using user-defined rules. Supports:
-- **Exact**, **Regex (RE2)** with capture groups (`\1`), and **Contain** modes
+- **Exact**, **Wildcard (*)**, and **Contain** modes
 - Per-rule enable/disable
 - Global enable/disable
 - Import/Export rules as JSON
 - Live **Logs** of applied rules via `declarativeNetRequest.onRuleMatchedDebug`
 
-> **Note on Regex:** Chrome's `declarativeNetRequest` uses **RE2**, not full JavaScript RegExp. Most common patterns work; lookarounds and backreferences in the pattern are not supported. We validate patterns with `isRegexSupported` before activating a rule.
+
 
 ## Installation (Load Unpacked)
 1. Download and unzip the archive.
@@ -24,7 +24,7 @@ The extension ships with **all assets locally**; no network/CDN required.
 1. Click **+ New Rule**.
 2. Choose **Mode**:
    - **Exact**: matches exactly the given URL.
-   - **Regex (RE2)**: write a RE2 pattern; use `\1`, `\2`, ... in **Destination URL** to reference capture groups.
+   - **Wildcard**: use `*` to match any characters in the Source URL.
    - **Contain**: matches when the Source is a substring of the URL.
 3. Fill **Source** and **Destination** and **Save**.
 
@@ -57,7 +57,7 @@ The extension ships with **all assets locally**; no network/CDN required.
 - Interception uses **dynamic DNR rules** via `updateDynamicRules`.
 - **Exact** → `regexFilter: ^...$` (escaped)
 - **Contain** → `urlFilter`
-- **Regex** → `regexFilter` + `redirect.regexSubstitution` if destination contains `\1`, `\2`, ...
+- **Wildcard** → `regexFilter` with `*` translated to `.*`
 - We keep a stable mapping of your rule IDs to DNR numeric IDs.
 - Log buffer capped at 1000 entries.
 

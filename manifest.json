@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "URL Interceptor & Redirector (Rules)",
   "version": "1.0.0",
-  "description": "Intercept and redirect URLs using Exact / Regex / Contain rules. Includes logging, import/export, and a global enable toggle.",
+  "description": "Intercept and redirect URLs using Exact / Wildcard / Contain rules. Includes logging, import/export, and a global enable toggle.",
   "permissions": [
     "declarativeNetRequest",
     "declarativeNetRequestFeedback",
