@@ -19,6 +19,7 @@ const els = {
   source: document.getElementById('source'),
   destination: document.getElementById('destination'),
   ruleId: document.getElementById('ruleId'),
+  btnCancelRule: document.getElementById('btnCancelRule'),
   confirmModal: document.getElementById('confirmModal'),
   confirmText: document.getElementById('confirmText'),
   btnNo: document.getElementById('btnNo'),
@@ -56,23 +57,23 @@ function renderRules() {
   if (!rules.length) {
     const empty = document.createElement('div');
     empty.className = 'small';
-    empty.textContent = 'No rules yet. Click “New Rule” to create one.';
+    empty.textContent = 'No rules yet. Click “Create Rule” to add one.';
     els.rulesList.appendChild(empty);
     return;
   }
   for (const r of rules) {
-    const row = document.createElement('div');
-    row.className = 'item';
+    const item = document.createElement('div');
+    item.className = 'item';
 
-    const left = document.createElement('div');
-    left.innerHTML = `<div class="name">${r.name}</div>
-      <div class="meta">${ruleBadge(r.mode)} ${r.enabled ? '' : '<span class="badge">Disabled</span>'}</div>`;
+    const top = document.createElement('div');
+    top.className = 'item-row';
 
-    const mid = document.createElement('div');
-    mid.innerHTML = `<div class="source">${r.source}</div><div class="dest">→ ${r.destination}</div>`;
+    const info = document.createElement('div');
+    info.innerHTML = `<div class="name">${r.name}</div><div class="meta">${ruleBadge(r.mode)} ${r.enabled ? '' : '<span class="badge">Disabled</span>'}</div>`;
 
-    const right = document.createElement('div');
-    right.className = 'row';
+    const actions = document.createElement('div');
+    actions.className = 'row';
+
     const toggle = document.createElement('label');
     toggle.className = 'switch';
     const input = document.createElement('input');
@@ -98,14 +99,20 @@ function renderRules() {
     btnDelete.textContent = 'Delete';
     btnDelete.addEventListener('click', () => confirmDelete(r));
 
-    right.appendChild(toggle);
-    right.appendChild(btnEdit);
-    right.appendChild(btnDelete);
+    actions.appendChild(toggle);
+    actions.appendChild(btnEdit);
+    actions.appendChild(btnDelete);
 
-    row.appendChild(left);
-    row.appendChild(mid);
-    row.appendChild(right);
-    els.rulesList.appendChild(row);
+    top.appendChild(info);
+    top.appendChild(actions);
+
+    const urls = document.createElement('div');
+    urls.className = 'item-row urls';
+    urls.innerHTML = `<span class="source">${r.source}</span><span class="arrow">→</span><span class="dest">${r.destination}</span>`;
+
+    item.appendChild(top);
+    item.appendChild(urls);
+    els.rulesList.appendChild(item);
   }
 }
 
@@ -118,7 +125,7 @@ function openRuleModal(existing) {
     els.destination.value = existing.destination;
     els.ruleId.value = existing.id;
   } else {
-    els.ruleModalTitle.textContent = 'New Rule';
+    els.ruleModalTitle.textContent = 'Create Rule';
     els.name.value = '';
     els.mode.value = 'exact';
     els.source.value = '';
@@ -159,8 +166,13 @@ els.ruleForm.addEventListener('submit', async (e) => {
     alert('Failed to save rule: ' + (resp && resp.error || 'unknown error'));
     return;
   }
-  els.ruleModal.close();
   await refresh();
+  els.ruleModal.close();
+});
+
+// Cancel in rule modal
+els.btnCancelRule.addEventListener('click', () => {
+  els.ruleModal.close();
 });
 
 // New
@@ -214,11 +226,33 @@ els.btnClearLogs.addEventListener('click', async () => {
 });
 
 function renderLogs() {
+  els.logsBody.innerHTML = '';
   if (!logs || !logs.length) {
     els.logsBody.textContent = 'No logs yet.';
     return;
   }
-  els.logsBody.textContent = logs.slice().reverse().join('\\n');
+  for (const entry of logs.slice().reverse()) {
+    let time = '', info = '';
+    if (typeof entry === 'string') {
+      const m = entry.match(/^\[(.*?)\]\s*(.*)$/);
+      time = m ? m[1] : '';
+      info = m ? m[2] : entry;
+    } else {
+      time = entry.time;
+      info = entry.info;
+    }
+    const row = document.createElement('div');
+    row.className = 'log-row';
+    const t = document.createElement('div');
+    t.className = 'log-time';
+    t.textContent = new Date(time).toLocaleString();
+    const i = document.createElement('div');
+    i.className = 'log-info';
+    i.textContent = info;
+    row.appendChild(t);
+    row.appendChild(i);
+    els.logsBody.appendChild(row);
+  }
 }
 
 // Live log updates
