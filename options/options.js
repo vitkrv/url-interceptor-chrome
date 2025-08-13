@@ -33,6 +33,7 @@ let rules = [];
 let logs = [];
 let globalEnabled = true;
 let pendingDeleteId = null;
+let currentRuleEnabled = true;
 
 function clearRuleErrors() {
   els.nameError.textContent = '';
@@ -71,7 +72,7 @@ function sendMessage(payload) {
 async function refresh() {
   const state = await sendMessage({ type: 'get-state' }) || {};
   rules = state.rules || [];
-  logs = state.logs || [];
+  logs = (state.logs || []).slice(-400);
   globalEnabled = !!state.globalEnabled;
   els.globalToggle.checked = globalEnabled;
   renderRules();
@@ -122,22 +123,36 @@ function renderRules() {
   for (const r of rules) {
     const item = document.createElement('div');
     item.className = 'item';
-    item.draggable = true;
     item.dataset.id = r.id;
-    item.addEventListener('dragstart', () => item.classList.add('dragging'));
-    item.addEventListener('dragend', async () => {
+    const handle = document.createElement('span');
+    handle.className = 'drag-handle';
+    handle.innerHTML = '&#9776;';
+    handle.draggable = true;
+    handle.addEventListener('dragstart', () => item.classList.add('dragging'));
+    handle.addEventListener('dragend', async () => {
       item.classList.remove('dragging');
       const ids = Array.from(els.rulesList.querySelectorAll('.item')).map(el => el.dataset.id);
-      await sendMessage({ type: 'reorder-rules', ids });
-      await refresh();
+      const resp = await sendMessage({ type: 'reorder-rules', ids });
+      if (resp && resp.ok) {
+        const map = new Map(rules.map(r => [r.id, r]));
+        rules = ids.map(id => map.get(id)).filter(Boolean);
+        renderRules();
+      } else {
+        await refresh();
+      }
     });
     if (!r.enabled) item.classList.add('disabled');
 
     const top = document.createElement('div');
     top.className = 'item-row';
 
+    const left = document.createElement('div');
+    left.className = 'row';
+    left.appendChild(handle);
+
     const info = document.createElement('div');
     info.innerHTML = `<div class="name">${r.name}</div><div class="meta">${ruleBadge(r.mode)} ${r.enabled ? '' : '<span class="badge">Disabled</span>'}</div>`;
+    left.appendChild(info);
 
     const actions = document.createElement('div');
     actions.className = 'row';
@@ -162,6 +177,11 @@ function renderRules() {
     btnEdit.textContent = 'Edit';
     btnEdit.addEventListener('click', () => openRuleModal(r));
 
+    const btnDup = document.createElement('button');
+    btnDup.className = 'btn outlined';
+    btnDup.textContent = 'Duplicate';
+    btnDup.addEventListener('click', () => openRuleModal(r, true));
+
     const btnDelete = document.createElement('button');
     btnDelete.className = 'btn danger';
     btnDelete.textContent = 'Delete';
@@ -169,9 +189,10 @@ function renderRules() {
 
     actions.appendChild(toggle);
     actions.appendChild(btnEdit);
+    actions.appendChild(btnDup);
     actions.appendChild(btnDelete);
 
-    top.appendChild(info);
+    top.appendChild(left);
     top.appendChild(actions);
 
     const urls = document.createElement('div');
@@ -184,15 +205,16 @@ function renderRules() {
   }
 }
 
-function openRuleModal(existing) {
+function openRuleModal(existing, duplicate = false) {
   clearRuleErrors();
   if (existing) {
-    els.ruleModalTitle.textContent = 'Edit Rule';
+    els.ruleModalTitle.textContent = duplicate ? 'Create Rule' : 'Edit Rule';
     els.name.value = existing.name;
     els.mode.value = existing.mode;
     els.source.value = existing.source;
     els.destination.value = existing.destination;
-    els.ruleId.value = existing.id;
+    els.ruleId.value = duplicate ? '' : existing.id;
+    currentRuleEnabled = existing.enabled;
   } else {
     els.ruleModalTitle.textContent = 'Create Rule';
     els.name.value = '';
@@ -200,6 +222,7 @@ function openRuleModal(existing) {
     els.source.value = '';
     els.destination.value = '';
     els.ruleId.value = '';
+    currentRuleEnabled = true;
   }
   els.ruleModal.showModal();
 }
@@ -229,7 +252,7 @@ els.ruleForm.addEventListener('submit', async (e) => {
     mode: els.mode.value,
     source: els.source.value.trim(),
     destination: els.destination.value.trim(),
-    enabled: true
+    enabled: currentRuleEnabled
   };
   const errors = {};
   if (!rule.name) errors.name = 'Name is required';
@@ -326,7 +349,7 @@ function renderLogs() {
     els.logsBody.textContent = 'No logs yet.';
     return;
   }
-  for (const entry of logs.slice().reverse()) {
+  for (const entry of logs.slice(-400).reverse()) {
     let time = '', info = '';
     if (typeof entry === 'string') {
       const m = entry.match(/^\[(.*?)\]\s*(.*)$/);

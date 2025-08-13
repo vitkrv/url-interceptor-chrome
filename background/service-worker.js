@@ -26,7 +26,7 @@ const STORAGE_KEYS = {
   MAP: "idMap" // map our rule.id -> DNR numeric id
 };
 
-const LOG_LIMIT = 1000; // keep last N logs
+const LOG_LIMIT = 400; // keep last N logs
 
 async function getState() {
   const data = await chrome.storage.local.get({
