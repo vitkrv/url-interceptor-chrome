@@ -24,7 +24,7 @@ body{
   position:sticky; top:0; background:#0f1115; z-index:3;
 }
 .brand{display:flex; align-items:center; gap:12px}
-.logo{width:34px; height:34px; border:2px solid var(--c-cyan); border-radius:10px; background:url('../icons/icon128.png') center/cover no-repeat}
+.logo{width:34px; height:34px; border-radius:10px; background:url('../icons/icon128.png') center/cover no-repeat}
 .titles h1{margin:0; font-size:18px}
 .titles span{font-size:12px; color:var(--c-muted)}
 .actions{display:flex; align-items:center; gap:10px}
@@ -41,8 +41,9 @@ body{
   padding:16px; border-radius:12px; border:1px solid rgba(255,255,255,.06);
   background: rgba(255,255,255,0.02);
   font-size:16px;
-  cursor:grab;
 }
+.drag-handle{cursor:grab; user-select:none; margin-right:8px}
+.drag-handle:active{cursor:grabbing}
 .item.disabled{ background: rgba(255,0,0,0.05); }
 .item.dragging{ opacity:.5; cursor:grabbing; }
 .item-row{display:flex; justify-content:space-between; align-items:center}
