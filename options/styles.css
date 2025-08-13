@@ -41,8 +41,10 @@ body{
   padding:16px; border-radius:12px; border:1px solid rgba(255,255,255,.06);
   background: rgba(255,255,255,0.02);
   font-size:16px;
+  cursor:grab;
 }
 .item.disabled{ background: rgba(255,0,0,0.05); }
+.item.dragging{ opacity:.5; cursor:grabbing; }
 .item-row{display:flex; justify-content:space-between; align-items:center}
 .item .name{font-weight:600; font-size:16px}
 .item .meta{font-size:14px; color:var(--c-muted); margin-top:6px}

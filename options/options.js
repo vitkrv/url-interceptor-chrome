@@ -83,6 +83,33 @@ function ruleBadge(mode) {
   return '<span class="badge gray">Exact</span>';
 }
 
+function getDragAfterElement(container, y) {
+  const items = [...container.querySelectorAll('.item:not(.dragging)')];
+  return items.reduce(
+    (closest, child) => {
+      const box = child.getBoundingClientRect();
+      const offset = y - box.top - box.height / 2;
+      if (offset < 0 && offset > closest.offset) {
+        return { offset, element: child };
+      }
+      return closest;
+    },
+    { offset: Number.NEGATIVE_INFINITY }
+  ).element;
+}
+
+els.rulesList.addEventListener('dragover', (e) => {
+  e.preventDefault();
+  const dragging = document.querySelector('.item.dragging');
+  if (!dragging) return;
+  const after = getDragAfterElement(els.rulesList, e.clientY);
+  if (after == null) {
+    els.rulesList.appendChild(dragging);
+  } else {
+    els.rulesList.insertBefore(dragging, after);
+  }
+});
+
 function renderRules() {
   els.rulesList.innerHTML = '';
   if (!rules.length) {
@@ -95,6 +122,15 @@ function renderRules() {
   for (const r of rules) {
     const item = document.createElement('div');
     item.className = 'item';
+    item.draggable = true;
+    item.dataset.id = r.id;
+    item.addEventListener('dragstart', () => item.classList.add('dragging'));
+    item.addEventListener('dragend', async () => {
+      item.classList.remove('dragging');
+      const ids = Array.from(els.rulesList.querySelectorAll('.item')).map(el => el.dataset.id);
+      await sendMessage({ type: 'reorder-rules', ids });
+      await refresh();
+    });
     if (!r.enabled) item.classList.add('disabled');
 
     const top = document.createElement('div');

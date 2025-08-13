@@ -265,11 +265,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       return;
     }
 
-    if (msg && msg.type === "delete-rule") {
-      const state = await getState();
-      const rules = state[STORAGE_KEYS.RULES] || [];
-      const idMap = state[STORAGE_KEYS.MAP] || {};
-      const idx = rules.findIndex(x => x.id === msg.id);
+      if (msg && msg.type === "delete-rule") {
+        const state = await getState();
+        const rules = state[STORAGE_KEYS.RULES] || [];
+        const idMap = state[STORAGE_KEYS.MAP] || {};
+        const idx = rules.findIndex(x => x.id === msg.id);
       if (idx >= 0) {
         const removed = rules.splice(idx, 1)[0];
         // remove from DNR too
@@ -282,6 +282,26 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           delete idMap[removed.id];
         }
         await setState({ [STORAGE_KEYS.RULES]: rules, [STORAGE_KEYS.MAP]: idMap });
+        sendResponse({ ok: true });
+        return;
+      }
+
+      if (msg && msg.type === "reorder-rules") {
+        const order = Array.isArray(msg.ids) ? msg.ids : [];
+        const state = await getState();
+        const current = state[STORAGE_KEYS.RULES] || [];
+        if (order.length !== current.length || new Set(order).size !== current.length) {
+          sendResponse({ ok: false, error: "Invalid order" });
+          return;
+        }
+        const map = new Map(current.map(r => [r.id, r]));
+        const reordered = order.map(id => map.get(id)).filter(Boolean);
+        if (reordered.length !== current.length) {
+          sendResponse({ ok: false, error: "Invalid order" });
+          return;
+        }
+        await setState({ [STORAGE_KEYS.RULES]: reordered });
+        await rebuildDnrRules();
         sendResponse({ ok: true });
         return;
       }
