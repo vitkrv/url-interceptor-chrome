@@ -101,6 +101,9 @@ function getDragAfterElement(container, y) {
 
 els.rulesList.addEventListener('dragover', (e) => {
   e.preventDefault();
+  // Explicitly mark this operation as a move so the dragged element
+  // isn't reverted by the browser's default drop handling.
+  if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
   const dragging = document.querySelector('.item.dragging');
   if (!dragging) return;
   const after = getDragAfterElement(els.rulesList, e.clientY);
@@ -112,7 +115,10 @@ els.rulesList.addEventListener('dragover', (e) => {
 });
 
 els.rulesList.addEventListener('drop', (e) => {
+  // Prevent the browser from performing its default drop action which
+  // could reset the element to its original position.
   e.preventDefault();
+  if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
 });
 
 function renderRules() {
@@ -132,7 +138,15 @@ function renderRules() {
     handle.className = 'drag-handle';
     handle.innerHTML = '&#9776;';
     handle.draggable = true;
-    handle.addEventListener('dragstart', () => item.classList.add('dragging'));
+    handle.addEventListener('dragstart', (e) => {
+      // Setting data and effectAllowed is required for reliable DnD
+      // behaviour in Chromium based browsers.
+      if (e.dataTransfer) {
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/plain', '');
+      }
+      item.classList.add('dragging');
+    });
     handle.addEventListener('dragend', async () => {
       item.classList.remove('dragging');
       const ids = Array.from(els.rulesList.querySelectorAll('.item')).map(el => el.dataset.id);
