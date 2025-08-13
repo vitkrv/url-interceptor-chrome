@@ -111,6 +111,10 @@ els.rulesList.addEventListener('dragover', (e) => {
   }
 });
 
+els.rulesList.addEventListener('drop', (e) => {
+  e.preventDefault();
+});
+
 function renderRules() {
   els.rulesList.innerHTML = '';
   if (!rules.length) {
