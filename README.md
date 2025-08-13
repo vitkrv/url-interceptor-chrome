@@ -7,6 +7,7 @@ A Chrome extension that intercepts and redirects URLs using user-defined rules. 
 - Global enable/disable
 - Import/Export rules as JSON
 - Live **Logs** of applied rules via `declarativeNetRequest.onRuleMatchedDebug`
+- Drag-and-drop reordering of rules
 
 
 
@@ -32,6 +33,7 @@ The extension ships with **all assets locally**; no network/CDN required.
 - **Edit** opens a pre-filled modal.
 - **Delete** asks for confirmation.
 - Toggle a rule with the switch on each row.
+- Drag and drop to reorder rules.
 
 ### Global Toggle
 - Use the switch on the top right to enable/disable **all** interception without deleting rules.
