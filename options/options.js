@@ -113,6 +113,14 @@ els.rulesList.addEventListener('dragover', (e) => {
 
 els.rulesList.addEventListener('drop', (e) => {
   e.preventDefault();
+  const dragging = document.querySelector('.item.dragging');
+  if (!dragging) return;
+  const after = getDragAfterElement(els.rulesList, e.clientY);
+  if (after == null) {
+    els.rulesList.appendChild(dragging);
+  } else {
+    els.rulesList.insertBefore(dragging, after);
+  }
 });
 
 function renderRules() {
