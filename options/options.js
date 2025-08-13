@@ -293,7 +293,8 @@ els.ruleForm.addEventListener('submit', async (e) => {
 });
 
 // Cancel in rule modal
-els.btnCancelRule.addEventListener('click', () => {
+els.btnCancelRule.addEventListener('click', (e) => {
+  e.preventDefault();
   els.ruleModal.close();
 });
 
