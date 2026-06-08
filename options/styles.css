@@ -48,9 +48,18 @@ body{
 .item.dragging{ opacity:.5; cursor:grabbing; }
 .item-row{display:flex; justify-content:space-between; align-items:center}
 .item .name{font-weight:600; font-size:16px}
-.item .meta{font-size:14px; color:var(--c-muted); margin-top:6px}
-.item .source, .item .dest{ font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace; font-size:14px }
-.item .urls{display:flex; gap:6px; align-items:center; justify-content:flex-start}
+.item .meta{font-size:14px; color:var(--c-muted); margin-top:6px; display:flex; gap:6px; flex-wrap:wrap}
+.item .source, .item .dest{
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;
+  font-size:14px;
+  overflow-wrap:anywhere;
+  word-break:break-word;
+}
+.item .urls{display:flex; gap:6px; align-items:flex-start; justify-content:flex-start; flex-wrap:wrap; min-width:0}
+.item .arrow{flex:none; color:var(--c-muted)}
+.rule-main{min-width:0}
+.rule-info{min-width:0}
+.item-actions{flex-wrap:wrap; justify-content:flex-end}
 .row{display:flex; gap:10px; align-items:center}
 .item .btn{ font-size:21px; padding:15px 21px; border-radius:18px }
 .btn{
@@ -100,6 +109,9 @@ body{
 .badge.orange{ background:#2a1b08; color:#ffb86b; }
 .badge.cyan{ background:#08242a; color:#7ee7f3; }
 .badge.gray{ background:#1c1f26; color:#bbc6d4; }
+.badge.purple{ background:#241633; color:#d8b4fe; }
+.badge.ok{ background:#0c2a1a; color:#8be6a8; }
+.badge.error{ background:#331116; color:#ff9aa8; }
 
 #btnNew{ font-size:42px; padding:30px 42px }
 #logsModal{ min-height:360px }

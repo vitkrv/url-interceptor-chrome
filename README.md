@@ -24,9 +24,9 @@ The extension ships with **all assets locally**; no network/CDN required.
 ### Create a Rule
 1. Click **+ New Rule**.
 2. Choose **Mode**:
-   - **Exact**: matches exactly the given URL.
-   - **Wildcard**: use `*` to match any characters in the Source URL.
-   - **Contain**: matches when the Source is a substring of the URL.
+   - **Exact**: matches exactly the given full `http` or `https` URL.
+   - **Wildcard**: use `*` to match any characters in the Source URL. Wildcard sources must start with `http://` or `https://`, for example `https://*.example.com/*`.
+   - **Contain**: matches when the Source is a substring of the URL, for example `example.com/path`.
 3. Fill **Source** and **Destination** and **Save**.
 
 ### Edit / Delete
@@ -61,7 +61,7 @@ The extension ships with **all assets locally**; no network/CDN required.
 - **Contain** → `urlFilter`
 - **Wildcard** → `regexFilter` with `*` translated to `.*`
 - We keep a stable mapping of your rule IDs to DNR numeric IDs.
-- Log buffer capped at 1000 entries.
+- Log buffer capped at 1000 entries. Logged request URLs are stored without query strings or fragments.
 
 ## Angular UI?
 This admin UI is implemented without a framework to remain zero-dependency and CSP-safe out of the box. If you **strictly require Angular + Angular Material** styling, say the word—I can provide a companion Angular source folder mirroring this UI (along with built assets) in an updated archive. Functionality will remain the same.

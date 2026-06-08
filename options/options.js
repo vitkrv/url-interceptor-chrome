@@ -31,6 +31,7 @@ const els = {
 
 let rules = [];
 let logs = [];
+let ruleStatuses = {};
 let globalEnabled = true;
 let pendingDeleteId = null;
 let currentRuleEnabled = true;
@@ -47,12 +48,49 @@ function clearRuleErrors() {
   });
 });
 
+els.mode.addEventListener('change', () => {
+  els.sourceError.textContent = '';
+  updateSourcePlaceholder();
+});
+
 function isValidHttpUrl(str) {
   try {
     const u = new URL(str);
     return u.protocol === 'http:' || u.protocol === 'https:';
   } catch {
     return false;
+  }
+}
+
+function getSourceValidationError(source, mode) {
+  const value = String(source || '').trim();
+  if (!value) return 'Source is required';
+
+  if (mode === 'exact') {
+    return isValidHttpUrl(value) ? '' : 'Exact source must be a valid http(s) URL';
+  }
+
+  if (mode === 'wildcard') {
+    if (!/^https?:\/\//i.test(value)) return 'Wildcard source must start with http:// or https://';
+    if (/\s/.test(value)) return 'Wildcard source cannot contain whitespace';
+    return '';
+  }
+
+  if (mode === 'contain') {
+    if (/\s/.test(value)) return 'Contain source cannot contain whitespace';
+    return '';
+  }
+
+  return 'Unsupported rule mode';
+}
+
+function updateSourcePlaceholder() {
+  if (els.mode.value === 'wildcard') {
+    els.source.placeholder = 'e.g., https://*.example.com/*';
+  } else if (els.mode.value === 'contain') {
+    els.source.placeholder = 'e.g., example.com/path';
+  } else {
+    els.source.placeholder = 'e.g., https://example.com/a';
   }
 }
 
@@ -72,16 +110,36 @@ function sendMessage(payload) {
 async function refresh() {
   const state = await sendMessage({ type: 'get-state' }) || {};
   rules = state.rules || [];
-  logs = (state.logs || []).slice(-400);
+  logs = (state.logs || []).slice(-1000);
+  ruleStatuses = state.ruleStatuses || {};
   globalEnabled = !!state.globalEnabled;
   els.globalToggle.checked = globalEnabled;
   renderRules();
 }
 
+function createBadge(text, className = '') {
+  const badge = document.createElement('span');
+  badge.className = `badge ${className}`.trim();
+  badge.textContent = text;
+  return badge;
+}
+
 function ruleBadge(mode) {
-  if (mode === 'wildcard') return '<span class="badge cyan">Wildcard</span>';
-  if (mode === 'contain') return '<span class="badge orange">Contain</span>';
-  return '<span class="badge gray">Exact</span>';
+  if (mode === 'wildcard') return createBadge('Wildcard', 'cyan');
+  if (mode === 'contain') return createBadge('Contain', 'orange');
+  return createBadge('Exact', 'purple');
+}
+
+function getRuleStatus(rule) {
+  if (!rule.enabled) return { ok: true, message: 'Disabled' };
+  return ruleStatuses[rule.id] || { ok: false, message: 'Status pending' };
+}
+
+function statusBadge(rule) {
+  const status = getRuleStatus(rule);
+  if (status.message === 'Disabled') return createBadge(status.message, 'gray');
+  const className = status.ok ? 'ok' : 'error';
+  return createBadge(status.message, className);
 }
 
 function getDragAfterElement(container, y) {
@@ -120,14 +178,17 @@ function renderRules() {
   if (!rules.length) {
     const empty = document.createElement('div');
     empty.className = 'small';
-    empty.textContent = 'No rules yet. Click “Create Rule” to add one.';
+    empty.textContent = 'No rules yet. Click "Create Rule" to add one.';
     els.rulesList.appendChild(empty);
     return;
   }
+
   for (const r of rules) {
     const item = document.createElement('div');
     item.className = 'item';
     item.dataset.id = r.id;
+    if (!r.enabled) item.classList.add('disabled');
+
     const handle = document.createElement('span');
     handle.className = 'drag-handle';
     handle.innerHTML = '&#9776;';
@@ -138,28 +199,36 @@ function renderRules() {
       const ids = Array.from(els.rulesList.querySelectorAll('.item')).map(el => el.dataset.id);
       const resp = await sendMessage({ type: 'reorder-rules', ids });
       if (resp && resp.ok) {
-        const map = new Map(rules.map(r => [r.id, r]));
+        const map = new Map(rules.map(rule => [rule.id, rule]));
         rules = ids.map(id => map.get(id)).filter(Boolean);
         renderRules();
       } else {
         await refresh();
       }
     });
-    if (!r.enabled) item.classList.add('disabled');
 
     const top = document.createElement('div');
     top.className = 'item-row';
 
     const left = document.createElement('div');
-    left.className = 'row';
+    left.className = 'row rule-main';
     left.appendChild(handle);
 
     const info = document.createElement('div');
-    info.innerHTML = `<div class="name">${r.name}</div><div class="meta">${ruleBadge(r.mode)} ${r.enabled ? '' : '<span class="badge">Disabled</span>'}</div>`;
+    info.className = 'rule-info';
+    const name = document.createElement('div');
+    name.className = 'name';
+    name.textContent = r.name;
+    const meta = document.createElement('div');
+    meta.className = 'meta';
+    meta.appendChild(ruleBadge(r.mode));
+    meta.appendChild(statusBadge(r));
+    info.appendChild(name);
+    info.appendChild(meta);
     left.appendChild(info);
 
     const actions = document.createElement('div');
-    actions.className = 'row';
+    actions.className = 'row item-actions';
 
     const toggle = document.createElement('label');
     toggle.className = 'switch';
@@ -201,7 +270,18 @@ function renderRules() {
 
     const urls = document.createElement('div');
     urls.className = 'item-row urls';
-    urls.innerHTML = `<span class="source">${r.source}</span><span class="arrow">→</span><span class="dest">${r.destination}</span>`;
+    const source = document.createElement('span');
+    source.className = 'source';
+    source.textContent = r.source;
+    const arrow = document.createElement('span');
+    arrow.className = 'arrow';
+    arrow.textContent = '->';
+    const dest = document.createElement('span');
+    dest.className = 'dest';
+    dest.textContent = r.destination;
+    urls.appendChild(source);
+    urls.appendChild(arrow);
+    urls.appendChild(dest);
 
     item.appendChild(top);
     item.appendChild(urls);
@@ -228,6 +308,7 @@ function openRuleModal(existing, duplicate = false) {
     els.ruleId.value = '';
     currentRuleEnabled = true;
   }
+  updateSourcePlaceholder();
   els.ruleModal.showModal();
 }
 
@@ -261,10 +342,10 @@ els.ruleForm.addEventListener('submit', async (e) => {
   const errors = {};
   if (!rule.name) errors.name = 'Name is required';
   if (rule.name && rule.name.length > 80) errors.name = 'Name exceeds 80 characters';
-  if (!rule.source) errors.source = 'Source is required';
+  const sourceError = getSourceValidationError(rule.source, rule.mode);
+  if (sourceError) errors.source = sourceError;
   if (!rule.destination) errors.destination = 'Destination is required';
-  if (rule.source && !isValidHttpUrl(rule.source)) errors.source = 'Invalid URL';
-  if (rule.destination && !isValidHttpUrl(rule.destination)) errors.destination = 'Invalid URL';
+  if (rule.destination && !isValidHttpUrl(rule.destination)) errors.destination = 'Destination must be a valid http(s) URL';
   if (Object.keys(errors).length) {
     if (errors.name) els.nameError.textContent = errors.name;
     if (errors.source) els.sourceError.textContent = errors.source;
@@ -276,7 +357,7 @@ els.ruleForm.addEventListener('submit', async (e) => {
     if (resp) {
       if (resp.error === 'Name exceeds 80 characters') {
         els.nameError.textContent = resp.error;
-      } else if (resp.error === 'Source must be a valid URL') {
+      } else if (/source|wildcard|contain/i.test(resp.error)) {
         els.sourceError.textContent = resp.error;
       } else if (resp.error === 'Destination must be a valid URL') {
         els.destinationError.textContent = resp.error;
@@ -331,6 +412,7 @@ els.fileImport.addEventListener('change', async (ev) => {
   try { payload = JSON.parse(text); } catch { alert('Invalid JSON'); return; }
   const resp = await sendMessage({ type: 'import-rules', rules: payload });
   if (!resp || !resp.ok) alert('Import failed: ' + (resp && resp.error || 'unknown'));
+  if (resp && resp.ok && resp.skipped) alert(`Imported ${resp.count} rules. Skipped ${resp.skipped} invalid rules.`);
   await refresh();
   ev.target.value = '';
 });
@@ -354,7 +436,7 @@ function renderLogs() {
     els.logsBody.textContent = 'No logs yet.';
     return;
   }
-  for (const entry of logs.slice(-400).reverse()) {
+  for (const entry of logs.slice(-1000).reverse()) {
     let time = '', info = '';
     if (typeof entry === 'string') {
       const m = entry.match(/^\[(.*?)\]\s*(.*)$/);

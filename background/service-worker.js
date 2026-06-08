@@ -23,10 +23,28 @@ const STORAGE_KEYS = {
   GLOBAL_ENABLED: "globalEnabled",
   LOGS: "logs",
   NEXT_DNR_ID: "nextDnrId",
-  MAP: "idMap" // map our rule.id -> DNR numeric id
+  MAP: "idMap", // map our rule.id -> DNR numeric id
+  RULE_STATUSES: "ruleStatuses"
 };
 
-const LOG_LIMIT = 400; // keep last N logs
+const LOG_LIMIT = 1000; // keep last N logs
+const DNR_RESOURCE_TYPES = [
+  "main_frame",
+  "sub_frame",
+  "stylesheet",
+  "script",
+  "image",
+  "font",
+  "object",
+  "xmlhttprequest",
+  "ping",
+  "csp_report",
+  "media",
+  "websocket",
+  "other"
+];
+
+let logWriteQueue = Promise.resolve();
 
 async function getState() {
   const data = await chrome.storage.local.get({
@@ -34,7 +52,8 @@ async function getState() {
     [STORAGE_KEYS.GLOBAL_ENABLED]: true,
     [STORAGE_KEYS.LOGS]: [],
     [STORAGE_KEYS.NEXT_DNR_ID]: 1000,
-    [STORAGE_KEYS.MAP]: {}
+    [STORAGE_KEYS.MAP]: {},
+    [STORAGE_KEYS.RULE_STATUSES]: {}
   });
   return data;
 }
@@ -57,15 +76,81 @@ function isValidHttpUrl(str) {
   }
 }
 
-// Build a DNR rule (or return null if unsupported/invalid)
+function getSourceValidationError(source, mode) {
+  const value = String(source || '').trim();
+  if (!value) return "Source is required";
+
+  if (mode === "exact") {
+    return isValidHttpUrl(value) ? "" : "Exact source must be a valid http(s) URL";
+  }
+
+  if (mode === "wildcard") {
+    if (!/^https?:\/\//i.test(value)) {
+      return "Wildcard source must start with http:// or https://";
+    }
+    if (/\s/.test(value)) {
+      return "Wildcard source cannot contain whitespace";
+    }
+    return "";
+  }
+
+  if (mode === "contain") {
+    if (/\s/.test(value)) {
+      return "Contain source cannot contain whitespace";
+    }
+    return "";
+  }
+
+  return "Unsupported rule mode";
+}
+
+function makeRuleStatus(ok, message) {
+  return {
+    ok,
+    message,
+    updatedAt: new Date().toISOString()
+  };
+}
+
+function redactUrlForLog(rawUrl) {
+  try {
+    const url = new URL(rawUrl);
+    url.username = "";
+    url.password = "";
+    url.search = "";
+    url.hash = "";
+    return url.toString();
+  } catch {
+    return String(rawUrl || "").split(/[?#]/)[0];
+  }
+}
+
+async function appendLog(entry) {
+  logWriteQueue = logWriteQueue.catch(() => {}).then(async () => {
+    const state = await getState();
+    const logs = state[STORAGE_KEYS.LOGS] || [];
+    logs.push(entry);
+    while (logs.length > LOG_LIMIT) logs.shift();
+    await setState({ [STORAGE_KEYS.LOGS]: logs });
+  });
+
+  await logWriteQueue;
+}
+
+// Build a DNR rule and an install status.
 async function toDnrRule(rule, dnrId) {
+  const sourceError = getSourceValidationError(rule.source, rule.mode);
+  if (sourceError) {
+    return { dnrRule: null, status: makeRuleStatus(false, sourceError) };
+  }
+
   const action = {
     type: "redirect",
     redirect: {}
   };
 
   const condition = {
-    resourceTypes: ["main_frame", "sub_frame", "xmlhttprequest", "script"]
+    resourceTypes: DNR_RESOURCE_TYPES
   };
 
   // Choose filter and redirect mapping
@@ -83,7 +168,12 @@ async function toDnrRule(rule, dnrId) {
 
     // Validate regex support
     const ok = await chrome.declarativeNetRequest.isRegexSupported({ regex: expr }).catch(() => ({ isSupported: false }));
-    if (!ok || ok.isSupported === false) return null;
+    if (!ok || ok.isSupported === false) {
+      return {
+        dnrRule: null,
+        status: makeRuleStatus(false, `Exact regex is not supported${ok && ok.reason ? `: ${ok.reason}` : ""}`)
+      };
+    }
   } else if (rule.mode === "wildcard") {
     // Convert wildcard pattern where "*" matches any characters
     const expr = "^" + rule.source.split("*").map(escapeRegex).join(".*") + "$";
@@ -91,19 +181,25 @@ async function toDnrRule(rule, dnrId) {
       .isRegexSupported({ regex: expr })
       .catch(() => ({ isSupported: false }));
     if (!support || support.isSupported === false) {
-      return null;
+      return {
+        dnrRule: null,
+        status: makeRuleStatus(false, `Wildcard pattern is not supported${support && support.reason ? `: ${support.reason}` : ""}`)
+      };
     }
     condition.regexFilter = expr;
     action.redirect = { url: rule.destination };
   } else {
-    return null;
+    return { dnrRule: null, status: makeRuleStatus(false, "Unsupported rule mode") };
   }
 
   return {
-    id: dnrId,
-    priority: 1,
-    action,
-    condition
+    dnrRule: {
+      id: dnrId,
+      priority: 1,
+      action,
+      condition
+    },
+    status: makeRuleStatus(true, "Installed")
   };
 }
 
@@ -113,6 +209,7 @@ async function rebuildDnrRules() {
   const rules = state[RULES] || [];
   const globalEnabled = state[GLOBAL_ENABLED] !== false;
   const idMap = state[MAP] || {};
+  const statuses = {};
 
   // First, clear all dynamic rules if global disabled
   if (!globalEnabled) {
@@ -121,6 +218,10 @@ async function rebuildDnrRules() {
       const removeIds = existing.map(r => r.id);
       await chrome.declarativeNetRequest.updateDynamicRules({ removeRuleIds: removeIds, addRules: [] });
     }
+    for (const r of rules) {
+      statuses[r.id] = makeRuleStatus(true, r.enabled ? "Global disabled" : "Disabled");
+    }
+    await setState({ [STORAGE_KEYS.RULE_STATUSES]: statuses });
     return;
   }
 
@@ -130,40 +231,43 @@ async function rebuildDnrRules() {
   const removeIds = existing.map(r => r.id);
 
   for (const r of rules) {
-    if (!r.enabled) continue;
-
-    let dnrId = idMap[r.id];
-    if (!dnrId) {
-      // allocate new id
-      const next = state[STORAGE_KEYS.NEXT_DNR_ID] || 1000;
-      dnrId = next;
-      idMap[r.id] = dnrId;
-      state[STORAGE_KEYS.NEXT_DNR_ID] = dnrId + 1;
+    if (!r.enabled) {
+      statuses[r.id] = makeRuleStatus(true, "Disabled");
+      continue;
     }
 
-    const dnrRule = await toDnrRule(r, dnrId);
-    if (dnrRule) {
-      add.push(dnrRule);
+    const dnrId = idMap[r.id] || state[STORAGE_KEYS.NEXT_DNR_ID] || 1000;
+    const result = await toDnrRule(r, dnrId);
+    statuses[r.id] = result.status;
+
+    if (result.dnrRule) {
+      if (!idMap[r.id]) {
+        idMap[r.id] = dnrId;
+        state[STORAGE_KEYS.NEXT_DNR_ID] = dnrId + 1;
+      }
+      add.push(result.dnrRule);
     } else {
       // rule invalid; drop its mapping so ids can be reused
       delete idMap[r.id];
     }
   }
 
-  // Commit storage changes (idMap / next id) before updating rules
-  await setState({
-    [STORAGE_KEYS.MAP]: idMap,
-    [STORAGE_KEYS.NEXT_DNR_ID]: state[STORAGE_KEYS.NEXT_DNR_ID]
-  });
-
   // Replace existing dynamic rules entirely to avoid duplicate IDs
   await chrome.declarativeNetRequest.updateDynamicRules({
     removeRuleIds: removeIds,
     addRules: add
   });
+
+  // Commit storage changes after Chrome accepts the DNR update.
+  await setState({
+    [STORAGE_KEYS.MAP]: idMap,
+    [STORAGE_KEYS.NEXT_DNR_ID]: state[STORAGE_KEYS.NEXT_DNR_ID],
+    [STORAGE_KEYS.RULE_STATUSES]: statuses
+  });
 }
 
-// Listen to rule matches for logging
+// Listen to rule matches for logging when the debug API is available.
+if (chrome.declarativeNetRequest.onRuleMatchedDebug) {
 chrome.declarativeNetRequest.onRuleMatchedDebug.addListener(async (info) => {
   try {
     const state = await getState();
@@ -172,7 +276,6 @@ chrome.declarativeNetRequest.onRuleMatchedDebug.addListener(async (info) => {
 
     const rules = state[STORAGE_KEYS.RULES] || [];
     const idMap = state[STORAGE_KEYS.MAP] || {};
-    const logs = state[STORAGE_KEYS.LOGS] || [];
 
     // Find our rule by DNR id
     const matchedId = info.rule.ruleId;
@@ -186,29 +289,34 @@ chrome.declarativeNetRequest.onRuleMatchedDebug.addListener(async (info) => {
     if (!matchedRule || !matchedRule.enabled) return;
 
     const ts = new Date().toISOString();
-    const pageUrl = info.request.url;
+    const pageUrl = redactUrlForLog(info.request.url);
 
-    logs.push({ time: ts, info: `on page [${pageUrl}] rule [${matchedRule.name}] applied` });
-    while (logs.length > LOG_LIMIT) logs.shift();
-
-    await setState({ [STORAGE_KEYS.LOGS]: logs });
+    await appendLog({ time: ts, info: `on page [${pageUrl}] rule [${matchedRule.name}] applied` });
     // notify UI
     await chrome.runtime.sendMessage({ type: "logs-updated" }).catch(() => {});
   } catch (e) {
     // swallow
   }
 });
+}
 
 // Messages from options UI
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   (async () => {
     try {
       if (msg && msg.type === "get-state") {
-      const state = await getState();
+      let state = await getState();
+      const rules = state[STORAGE_KEYS.RULES] || [];
+      const ruleStatuses = state[STORAGE_KEYS.RULE_STATUSES] || {};
+      if (rules.length && Object.keys(ruleStatuses).length === 0) {
+        await rebuildDnrRules();
+        state = await getState();
+      }
       sendResponse({
         rules: state[STORAGE_KEYS.RULES] || [],
         globalEnabled: state[STORAGE_KEYS.GLOBAL_ENABLED] !== false,
-        logs: state[STORAGE_KEYS.LOGS] || []
+        logs: state[STORAGE_KEYS.LOGS] || [],
+        ruleStatuses: state[STORAGE_KEYS.RULE_STATUSES] || {}
       });
       return;
     }
@@ -233,15 +341,16 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         sendResponse({ ok: false, error: "Name exceeds 80 characters" });
         return;
       }
-      if (!isValidHttpUrl(r.source)) {
-        sendResponse({ ok: false, error: "Source must be a valid URL" });
+      if (!["exact", "wildcard", "contain"].includes(r.mode)) r.mode = "exact";
+      const sourceError = getSourceValidationError(r.source, r.mode);
+      if (sourceError) {
+        sendResponse({ ok: false, error: sourceError });
         return;
       }
       if (!isValidHttpUrl(r.destination)) {
         sendResponse({ ok: false, error: "Destination must be a valid URL" });
         return;
       }
-      if (!["exact", "wildcard", "contain"].includes(r.mode)) r.mode = "exact";
       if (typeof r.enabled !== "boolean") r.enabled = true;
 
       const rules = current.slice();
@@ -269,6 +378,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       const state = await getState();
       const rules = state[STORAGE_KEYS.RULES] || [];
       const idMap = state[STORAGE_KEYS.MAP] || {};
+      const ruleStatuses = state[STORAGE_KEYS.RULE_STATUSES] || {};
       const idx = rules.findIndex(x => x.id === msg.id);
       if (idx >= 0) {
         const removed = rules.splice(idx, 1)[0];
@@ -281,7 +391,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           });
           delete idMap[removed.id];
         }
-        await setState({ [STORAGE_KEYS.RULES]: rules, [STORAGE_KEYS.MAP]: idMap });
+        delete ruleStatuses[removed.id];
+        await setState({ [STORAGE_KEYS.RULES]: rules, [STORAGE_KEYS.MAP]: idMap, [STORAGE_KEYS.RULE_STATUSES]: ruleStatuses });
         sendResponse({ ok: true });
         return;
       }
@@ -323,14 +434,25 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       }
       // Normalize & new IDs
       const normalized = [];
+      let skipped = 0;
       for (const r of incoming) {
-        if (!r || !r.name || !r.source || !r.destination) continue;
+        if (!r || !r.name || !r.source || !r.destination) {
+          skipped += 1;
+          continue;
+        }
+        const mode = ["exact", "wildcard", "contain"].includes(r.mode) ? r.mode : "exact";
+        const source = String(r.source).trim();
+        const destination = String(r.destination).trim();
+        if (getSourceValidationError(source, mode) || !isValidHttpUrl(destination)) {
+          skipped += 1;
+          continue;
+        }
         normalized.push({
           id: crypto.randomUUID(),
           name: String(r.name).slice(0, 80),
-          source: String(r.source),
-          destination: String(r.destination),
-          mode: ["exact", "wildcard", "contain"].includes(r.mode) ? r.mode : "exact",
+          source,
+          destination,
+          mode,
           enabled: typeof r.enabled === "boolean" ? r.enabled : true
         });
       }
@@ -338,7 +460,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       const rules = state[STORAGE_KEYS.RULES] || [];
       await setState({ [STORAGE_KEYS.RULES]: rules.concat(normalized) });
       await rebuildDnrRules();
-      sendResponse({ ok: true, count: normalized.length });
+      sendResponse({ ok: true, count: normalized.length, skipped });
       return;
     }
 
