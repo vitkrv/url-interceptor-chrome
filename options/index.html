@@ -37,6 +37,12 @@
         <div class="row">
           <button id="btnNew" class="btn">Create Rule</button>
         </div>
+        <div class="sidebar-separator"></div>
+        <div class="categories-header">
+          <h2>Categories</h2>
+          <button id="btnNewCategory" class="btn outlined compact" type="button">Add</button>
+        </div>
+        <div id="categoriesList" class="categories-list"></div>
       </section>
 
       <section class="rules card">
@@ -66,6 +72,13 @@
         </label>
 
         <label class="field">
+          <span>Category</span>
+          <select id="category" name="category">
+            <option value="">Uncategorized</option>
+          </select>
+        </label>
+
+        <label class="field">
           <span>Source URL / Pattern</span>
           <input type="text" id="source" name="source" required placeholder="e.g., https://example.com/*/a">
           <div class="error" id="sourceError"></div>
@@ -89,6 +102,37 @@
         </div>
         <input type="hidden" id="ruleId" name="ruleId">
       </form>
+    </dialog>
+
+    <!-- Category Settings Modal -->
+    <dialog id="categoryModal" class="modal">
+      <form method="dialog" id="categoryForm">
+        <h3 id="categoryModalTitle">Create Category</h3>
+        <label class="field">
+          <span>Name</span>
+          <input type="text" id="categoryName" name="categoryName" maxlength="80" required>
+          <div class="error" id="categoryNameError"></div>
+        </label>
+        <div class="modal-actions">
+          <button id="btnDeleteCategory" type="button" class="btn danger">Remove</button>
+          <div class="spacer"></div>
+          <button id="btnCancelCategory" type="button" value="cancel" class="btn text">Cancel</button>
+          <button id="btnSaveCategory" class="btn">Save</button>
+        </div>
+        <input type="hidden" id="categoryId" name="categoryId">
+      </form>
+    </dialog>
+
+    <!-- Category Delete Choice Modal -->
+    <dialog id="categoryDeleteChoiceModal" class="modal">
+      <div class="confirm-content">
+        <p id="categoryDeleteChoiceText">What should happen to assigned rules?</p>
+        <div class="modal-actions">
+          <button id="btnCancelCategoryDeleteChoice" class="btn text" type="button">Cancel</button>
+          <button id="btnMoveRulesToUncategorized" class="btn outlined" type="button">Move to Uncategorized</button>
+          <button id="btnDeleteCategoryRules" class="btn danger" type="button">Delete Rules</button>
+        </div>
+      </div>
     </dialog>
 
     <!-- Confirm Modal -->

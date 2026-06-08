@@ -12,7 +12,8 @@
  *   mode: "exact" | "wildcard" | "contain",
  *   source: string,
  *   destination: string,
- *   enabled: boolean
+ *   enabled: boolean,
+ *   categoryId: string | null // optional; missing/null means Uncategorized
  * }
  *
  * We maintain a mapping between our rule.id and a numeric DNR ruleId.
@@ -20,6 +21,7 @@
 
 const STORAGE_KEYS = {
   RULES: "rules",
+  CATEGORIES: "categories",
   GLOBAL_ENABLED: "globalEnabled",
   LOGS: "logs",
   NEXT_DNR_ID: "nextDnrId",
@@ -49,6 +51,7 @@ let logWriteQueue = Promise.resolve();
 async function getState() {
   const data = await chrome.storage.local.get({
     [STORAGE_KEYS.RULES]: [],
+    [STORAGE_KEYS.CATEGORIES]: [],
     [STORAGE_KEYS.GLOBAL_ENABLED]: true,
     [STORAGE_KEYS.LOGS]: [],
     [STORAGE_KEYS.NEXT_DNR_ID]: 1000,
@@ -60,6 +63,35 @@ async function getState() {
 
 async function setState(patch) {
   return chrome.storage.local.set(patch);
+}
+
+function normalizeCategoryName(name) {
+  return String(name || "").trim();
+}
+
+function getCategoryId(categoryId, categories) {
+  const id = typeof categoryId === "string" && categoryId ? categoryId : null;
+  if (!id) return null;
+  return categories.some(category => category.id === id) ? id : null;
+}
+
+function normalizeCategory(category) {
+  if (!category || typeof category.id !== "string") return null;
+  const name = normalizeCategoryName(category.name);
+  if (!name) return null;
+  return { id: category.id, name };
+}
+
+function normalizeCategories(categories) {
+  const seen = new Set();
+  const normalized = [];
+  for (const category of Array.isArray(categories) ? categories : []) {
+    const next = normalizeCategory(category);
+    if (!next || seen.has(next.id)) continue;
+    seen.add(next.id);
+    normalized.push(next);
+  }
+  return normalized;
 }
 
 // Escape for exact-match regex
@@ -314,6 +346,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       }
       sendResponse({
         rules: state[STORAGE_KEYS.RULES] || [],
+        categories: normalizeCategories(state[STORAGE_KEYS.CATEGORIES]),
         globalEnabled: state[STORAGE_KEYS.GLOBAL_ENABLED] !== false,
         logs: state[STORAGE_KEYS.LOGS] || [],
         ruleStatuses: state[STORAGE_KEYS.RULE_STATUSES] || {}
@@ -331,6 +364,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (msg && msg.type === "save-rule") {
       const state = await getState();
       const current = state[STORAGE_KEYS.RULES] || [];
+      const categories = normalizeCategories(state[STORAGE_KEYS.CATEGORIES]);
       const r = msg.rule;
       // Basic validation
       if (!r || !r.name || !r.source || !r.destination) {
@@ -352,6 +386,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         return;
       }
       if (typeof r.enabled !== "boolean") r.enabled = true;
+      r.categoryId = getCategoryId(r.categoryId, categories);
 
       const rules = current.slice();
       if (r.id) {
@@ -400,10 +435,124 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       return;
     }
 
+    if (msg && msg.type === "save-category") {
+      const state = await getState();
+      const categories = normalizeCategories(state[STORAGE_KEYS.CATEGORIES]);
+      const incoming = msg.category || {};
+      const name = normalizeCategoryName(incoming.name);
+      if (!name) {
+        sendResponse({ ok: false, error: "Category name is required" });
+        return;
+      }
+
+      let category;
+      if (incoming.id) {
+        const idx = categories.findIndex(x => x.id === incoming.id);
+        if (idx < 0) {
+          sendResponse({ ok: false, error: "Category not found" });
+          return;
+        }
+        category = { ...categories[idx], name };
+        categories[idx] = category;
+      } else {
+        category = { id: crypto.randomUUID(), name };
+        categories.push(category);
+      }
+
+      await setState({ [STORAGE_KEYS.CATEGORIES]: categories });
+      sendResponse({ ok: true, category });
+      return;
+    }
+
+    if (msg && msg.type === "delete-category") {
+      const categoryId = typeof msg.categoryId === "string" ? msg.categoryId : "";
+      const mode = msg.mode;
+      if (!categoryId || !["deleteRules", "moveRulesToUncategorized"].includes(mode)) {
+        sendResponse({ ok: false, error: "Invalid category delete request" });
+        return;
+      }
+
+      const state = await getState();
+      const categories = normalizeCategories(state[STORAGE_KEYS.CATEGORIES]);
+      if (!categories.some(category => category.id === categoryId)) {
+        sendResponse({ ok: false, error: "Category not found" });
+        return;
+      }
+
+      const idMap = state[STORAGE_KEYS.MAP] || {};
+      const ruleStatuses = state[STORAGE_KEYS.RULE_STATUSES] || {};
+      let rules = state[STORAGE_KEYS.RULES] || [];
+      if (mode === "deleteRules") {
+        const removedIds = new Set(rules.filter(rule => rule.categoryId === categoryId).map(rule => rule.id));
+        rules = rules.filter(rule => rule.categoryId !== categoryId);
+        for (const id of removedIds) {
+          delete idMap[id];
+          delete ruleStatuses[id];
+        }
+      } else {
+        rules = rules.map(rule => (
+          rule.categoryId === categoryId ? { ...rule, categoryId: null } : rule
+        ));
+      }
+
+      await setState({
+        [STORAGE_KEYS.CATEGORIES]: categories.filter(category => category.id !== categoryId),
+        [STORAGE_KEYS.RULES]: rules,
+        [STORAGE_KEYS.MAP]: idMap,
+        [STORAGE_KEYS.RULE_STATUSES]: ruleStatuses
+      });
+      await rebuildDnrRules();
+      sendResponse({ ok: true });
+      return;
+    }
+
+    if (msg && msg.type === "assign-rule-category") {
+      const state = await getState();
+      const categories = normalizeCategories(state[STORAGE_KEYS.CATEGORIES]);
+      const categoryId = getCategoryId(msg.categoryId, categories);
+      const rules = state[STORAGE_KEYS.RULES] || [];
+      const idx = rules.findIndex(rule => rule.id === msg.ruleId);
+      if (idx < 0) {
+        sendResponse({ ok: false, error: "Rule not found" });
+        return;
+      }
+
+      rules[idx] = { ...rules[idx], categoryId };
+      await setState({ [STORAGE_KEYS.RULES]: rules });
+      sendResponse({ ok: true });
+      return;
+    }
+
     if (msg && msg.type === "reorder-rules") {
       const order = Array.isArray(msg.ids) ? msg.ids : [];
       const state = await getState();
       const current = state[STORAGE_KEYS.RULES] || [];
+      const categories = normalizeCategories(state[STORAGE_KEYS.CATEGORIES]);
+      if ("categoryId" in msg) {
+        const categoryId = getCategoryId(msg.categoryId, categories);
+        const subset = current.filter(rule => getCategoryId(rule.categoryId, categories) === categoryId);
+        if (order.length !== subset.length || new Set(order).size !== subset.length) {
+          sendResponse({ ok: false, error: "Invalid order" });
+          return;
+        }
+        const subsetMap = new Map(subset.map(rule => [rule.id, rule]));
+        const reorderedSubset = order.map(id => subsetMap.get(id)).filter(Boolean);
+        if (reorderedSubset.length !== subset.length) {
+          sendResponse({ ok: false, error: "Invalid order" });
+          return;
+        }
+        let nextIndex = 0;
+        const reordered = current.map(rule => {
+          if (getCategoryId(rule.categoryId, categories) !== categoryId) return rule;
+          const next = reorderedSubset[nextIndex];
+          nextIndex += 1;
+          return next;
+        });
+        await setState({ [STORAGE_KEYS.RULES]: reordered });
+        await rebuildDnrRules();
+        sendResponse({ ok: true });
+        return;
+      }
       if (order.length !== current.length || new Set(order).size !== current.length) {
         sendResponse({ ok: false, error: "Invalid order" });
         return;
@@ -422,16 +571,27 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
     if (msg && msg.type === "export-rules") {
       const state = await getState();
-      sendResponse({ ok: true, rules: state[STORAGE_KEYS.RULES] || [] });
+      const data = {
+        categories: normalizeCategories(state[STORAGE_KEYS.CATEGORIES]),
+        rules: state[STORAGE_KEYS.RULES] || []
+      };
+      sendResponse({ ok: true, data, rules: data.rules });
       return;
     }
 
     if (msg && msg.type === "import-rules") {
-      const incoming = msg.rules;
-      if (!Array.isArray(incoming)) {
+      const payload = msg.rules;
+      const incoming = Array.isArray(payload) ? payload : payload && Array.isArray(payload.rules) ? payload.rules : null;
+      if (!incoming) {
         sendResponse({ ok: false, error: "Invalid import payload" });
         return;
       }
+      const incomingCategories = Array.isArray(payload) ? [] : normalizeCategories(payload.categories);
+      const importedCategories = incomingCategories.map(category => ({
+        id: crypto.randomUUID(),
+        name: category.name
+      }));
+      const categoryMap = new Map(incomingCategories.map((category, index) => [category.id, importedCategories[index].id]));
       // Normalize & new IDs
       const normalized = [];
       let skipped = 0;
@@ -453,12 +613,17 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           source,
           destination,
           mode,
-          enabled: typeof r.enabled === "boolean" ? r.enabled : true
+          enabled: typeof r.enabled === "boolean" ? r.enabled : true,
+          categoryId: categoryMap.get(r.categoryId) || null
         });
       }
       const state = await getState();
       const rules = state[STORAGE_KEYS.RULES] || [];
-      await setState({ [STORAGE_KEYS.RULES]: rules.concat(normalized) });
+      const categories = normalizeCategories(state[STORAGE_KEYS.CATEGORIES]).concat(importedCategories);
+      await setState({
+        [STORAGE_KEYS.RULES]: rules.concat(normalized),
+        [STORAGE_KEYS.CATEGORIES]: categories
+      });
       await rebuildDnrRules();
       sendResponse({ ok: true, count: normalized.length, skipped });
       return;

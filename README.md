@@ -5,7 +5,8 @@ A Chrome extension that intercepts and redirects URLs using user-defined rules. 
 - **Exact**, **Wildcard (*)**, and **Contain** modes
 - Per-rule enable/disable
 - Global enable/disable
-- Import/Export rules as JSON
+- Categories with filtered rule lists and drag-and-drop assignment
+- Import/Export rules and categories as JSON
 - Live **Logs** of applied rules via `declarativeNetRequest.onRuleMatchedDebug`
 - Drag-and-drop reordering of rules
 
@@ -27,7 +28,15 @@ The extension ships with **all assets locally**; no network/CDN required.
    - **Exact**: matches exactly the given full `http` or `https` URL.
    - **Wildcard**: use `*` to match any characters in the Source URL. Wildcard sources must start with `http://` or `https://`, for example `https://*.example.com/*`.
    - **Contain**: matches when the Source is a substring of the URL, for example `example.com/path`.
-3. Fill **Source** and **Destination** and **Save**.
+3. Optionally choose a **Category**.
+4. Fill **Source** and **Destination** and **Save**.
+
+### Categories
+- **Uncategorized** always appears first and contains rules without a category.
+- Category rows show total rules and enabled rules.
+- Select a category to filter the rules list.
+- Drag a rule to a category in the sidebar to assign or reassign it.
+- Use **Settings** on a selected category to rename or remove it. Removing a category asks whether assigned rules should be deleted or moved to Uncategorized.
 
 ### Edit / Delete
 - **Edit** opens a pre-filled modal.
@@ -39,8 +48,8 @@ The extension ships with **all assets locally**; no network/CDN required.
 - Use the switch on the top right to enable/disable **all** interception without deleting rules.
 
 ### Import/Export
-- **Export** downloads `rules-export.json` with your rules.
-- **Import** selects a JSON file (array of rules with fields: `name`, `mode`, `source`, `destination`, `enabled`). Imported rules get new IDs.
+- **Export** downloads `rules-export.json` with `{ categories, rules }`.
+- **Import** accepts the exported object format, or the legacy array of rules with fields: `name`, `mode`, `source`, `destination`, `enabled`. Imported rules and categories get new IDs.
 
 ### Logs
 - Click **Logs** to see entries in the format:

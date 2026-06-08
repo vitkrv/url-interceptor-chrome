@@ -1,8 +1,11 @@
-
 // options.js
+const UNCATEGORIZED_ID = '';
+
 const els = {
   rulesList: document.getElementById('rulesList'),
+  categoriesList: document.getElementById('categoriesList'),
   btnNew: document.getElementById('btnNew'),
+  btnNewCategory: document.getElementById('btnNewCategory'),
   btnExport: document.getElementById('btnExport'),
   fileImport: document.getElementById('fileImport'),
   btnLogs: document.getElementById('btnLogs'),
@@ -16,6 +19,7 @@ const els = {
   ruleModalTitle: document.getElementById('ruleModalTitle'),
   name: document.getElementById('name'),
   mode: document.getElementById('mode'),
+  category: document.getElementById('category'),
   source: document.getElementById('source'),
   destination: document.getElementById('destination'),
   nameError: document.getElementById('nameError'),
@@ -23,6 +27,19 @@ const els = {
   destinationError: document.getElementById('destinationError'),
   ruleId: document.getElementById('ruleId'),
   btnCancelRule: document.getElementById('btnCancelRule'),
+  categoryModal: document.getElementById('categoryModal'),
+  categoryForm: document.getElementById('categoryForm'),
+  categoryModalTitle: document.getElementById('categoryModalTitle'),
+  categoryName: document.getElementById('categoryName'),
+  categoryNameError: document.getElementById('categoryNameError'),
+  categoryId: document.getElementById('categoryId'),
+  btnDeleteCategory: document.getElementById('btnDeleteCategory'),
+  btnCancelCategory: document.getElementById('btnCancelCategory'),
+  categoryDeleteChoiceModal: document.getElementById('categoryDeleteChoiceModal'),
+  categoryDeleteChoiceText: document.getElementById('categoryDeleteChoiceText'),
+  btnCancelCategoryDeleteChoice: document.getElementById('btnCancelCategoryDeleteChoice'),
+  btnMoveRulesToUncategorized: document.getElementById('btnMoveRulesToUncategorized'),
+  btnDeleteCategoryRules: document.getElementById('btnDeleteCategoryRules'),
   confirmModal: document.getElementById('confirmModal'),
   confirmText: document.getElementById('confirmText'),
   btnNo: document.getElementById('btnNo'),
@@ -30,11 +47,16 @@ const els = {
 };
 
 let rules = [];
+let categories = [];
 let logs = [];
 let ruleStatuses = {};
 let globalEnabled = true;
-let pendingDeleteId = null;
 let currentRuleEnabled = true;
+let selectedCategoryId = UNCATEGORIZED_ID;
+let pendingConfirm = null;
+let pendingCategoryDelete = null;
+let draggedRuleId = null;
+let categoryDropHandled = false;
 
 function clearRuleErrors() {
   els.nameError.textContent = '';
@@ -42,11 +64,17 @@ function clearRuleErrors() {
   els.destinationError.textContent = '';
 }
 
+function clearCategoryErrors() {
+  els.categoryNameError.textContent = '';
+}
+
 ['name', 'source', 'destination'].forEach((id) => {
   els[id].addEventListener('input', () => {
     els[id + 'Error'].textContent = '';
   });
 });
+
+els.categoryName.addEventListener('input', clearCategoryErrors);
 
 els.mode.addEventListener('change', () => {
   els.sourceError.textContent = '';
@@ -97,7 +125,7 @@ function updateSourcePlaceholder() {
 function sendMessage(payload) {
   return new Promise((resolve) => {
     chrome.runtime.sendMessage(payload, (resp) => {
-      // Access runtime.lastError to avoid "Unchecked runtime.lastError" warnings
+      // Access runtime.lastError to avoid "Unchecked runtime.lastError" warnings.
       if (chrome.runtime.lastError) {
         resolve(undefined);
         return;
@@ -107,13 +135,37 @@ function sendMessage(payload) {
   });
 }
 
+function getCategoryById(categoryId) {
+  return categories.find(category => category.id === categoryId) || null;
+}
+
+function getRuleCategoryId(rule) {
+  const id = typeof rule.categoryId === 'string' ? rule.categoryId : UNCATEGORIZED_ID;
+  return getCategoryById(id) ? id : UNCATEGORIZED_ID;
+}
+
+function getSelectedCategoryName() {
+  const category = getCategoryById(selectedCategoryId);
+  return category ? category.name : 'Uncategorized';
+}
+
+function getVisibleRules() {
+  return rules.filter(rule => getRuleCategoryId(rule) === selectedCategoryId);
+}
+
 async function refresh() {
   const state = await sendMessage({ type: 'get-state' }) || {};
   rules = state.rules || [];
+  categories = state.categories || [];
   logs = (state.logs || []).slice(-1000);
   ruleStatuses = state.ruleStatuses || {};
   globalEnabled = !!state.globalEnabled;
+  if (selectedCategoryId && !getCategoryById(selectedCategoryId)) {
+    selectedCategoryId = UNCATEGORIZED_ID;
+  }
   els.globalToggle.checked = globalEnabled;
+  renderCategoryOptions();
+  renderCategories();
   renderRules();
 }
 
@@ -140,6 +192,106 @@ function statusBadge(rule) {
   if (status.message === 'Disabled') return createBadge(status.message, 'gray');
   const className = status.ok ? 'ok' : 'error';
   return createBadge(status.message, className);
+}
+
+function getCategoryCounts(categoryId) {
+  const assigned = rules.filter(rule => getRuleCategoryId(rule) === categoryId);
+  return {
+    total: assigned.length,
+    enabled: assigned.filter(rule => !!rule.enabled).length
+  };
+}
+
+function renderCategoryOptions(selectedValue = els.category.value) {
+  els.category.innerHTML = '';
+  const uncategorized = document.createElement('option');
+  uncategorized.value = UNCATEGORIZED_ID;
+  uncategorized.textContent = 'Uncategorized';
+  els.category.appendChild(uncategorized);
+
+  for (const category of categories) {
+    const option = document.createElement('option');
+    option.value = category.id;
+    option.textContent = category.name;
+    els.category.appendChild(option);
+  }
+
+  els.category.value = getCategoryById(selectedValue) ? selectedValue : UNCATEGORIZED_ID;
+}
+
+function renderCategories() {
+  els.categoriesList.innerHTML = '';
+  const categoryItems = [{ id: UNCATEGORIZED_ID, name: 'Uncategorized', virtual: true }].concat(categories);
+
+  for (const category of categoryItems) {
+    const row = document.createElement('div');
+    row.className = 'category-row';
+    row.dataset.categoryId = category.id;
+    if (category.id === selectedCategoryId) row.classList.add('selected');
+    const counts = getCategoryCounts(category.id);
+    if (counts.enabled > 0) row.classList.add('has-enabled');
+
+    const main = document.createElement('button');
+    main.type = 'button';
+    main.className = 'category-main';
+    main.addEventListener('click', () => {
+      selectedCategoryId = category.id;
+      renderCategories();
+      renderRules();
+    });
+
+    const name = document.createElement('span');
+    name.className = 'category-name';
+    name.textContent = category.name;
+    const count = document.createElement('span');
+    count.className = 'category-count';
+    count.textContent = String(counts.total);
+    const enabled = document.createElement('span');
+    enabled.className = 'category-enabled';
+    enabled.textContent = `${counts.enabled} enabled`;
+
+    main.appendChild(name);
+    main.appendChild(count);
+    main.appendChild(enabled);
+    row.appendChild(main);
+
+    if (!category.virtual && category.id === selectedCategoryId) {
+      const settings = document.createElement('button');
+      settings.type = 'button';
+      settings.className = 'btn outlined compact category-settings icon-btn';
+      settings.setAttribute('aria-label', 'Category settings');
+      settings.title = 'Category settings';
+      settings.innerHTML = '&#9881;';
+      settings.addEventListener('click', () => openCategoryModal(category));
+      row.appendChild(settings);
+    }
+
+    row.addEventListener('dragover', (e) => {
+      if (!draggedRuleId) return;
+      e.preventDefault();
+      row.classList.add('drop-target');
+    });
+    row.addEventListener('dragleave', () => {
+      row.classList.remove('drop-target');
+    });
+    row.addEventListener('drop', async (e) => {
+      if (!draggedRuleId) return;
+      e.preventDefault();
+      row.classList.remove('drop-target');
+      categoryDropHandled = true;
+      const resp = await sendMessage({
+        type: 'assign-rule-category',
+        ruleId: draggedRuleId,
+        categoryId: category.id || null
+      });
+      if (!resp || !resp.ok) {
+        alert('Failed to assign category: ' + (resp && resp.error || 'unknown'));
+      }
+      await refresh();
+    });
+
+    els.categoriesList.appendChild(row);
+  }
 }
 
 function getDragAfterElement(container, y) {
@@ -175,15 +327,18 @@ els.rulesList.addEventListener('drop', (e) => {
 
 function renderRules() {
   els.rulesList.innerHTML = '';
-  if (!rules.length) {
+  const visibleRules = getVisibleRules();
+  if (!visibleRules.length) {
     const empty = document.createElement('div');
     empty.className = 'small';
-    empty.textContent = 'No rules yet. Click "Create Rule" to add one.';
+    empty.textContent = rules.length
+      ? `No rules in ${getSelectedCategoryName()}.`
+      : 'No rules yet. Click "Create Rule" to add one.';
     els.rulesList.appendChild(empty);
     return;
   }
 
-  for (const r of rules) {
+  for (const r of visibleRules) {
     const item = document.createElement('div');
     item.className = 'item';
     item.dataset.id = r.id;
@@ -193,18 +348,31 @@ function renderRules() {
     handle.className = 'drag-handle';
     handle.innerHTML = '&#9776;';
     handle.draggable = true;
-    handle.addEventListener('dragstart', () => item.classList.add('dragging'));
+    handle.addEventListener('dragstart', (e) => {
+      draggedRuleId = r.id;
+      categoryDropHandled = false;
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', r.id);
+      item.classList.add('dragging');
+    });
     handle.addEventListener('dragend', async () => {
       item.classList.remove('dragging');
-      const ids = Array.from(els.rulesList.querySelectorAll('.item')).map(el => el.dataset.id);
-      const resp = await sendMessage({ type: 'reorder-rules', ids });
-      if (resp && resp.ok) {
-        const map = new Map(rules.map(rule => [rule.id, rule]));
-        rules = ids.map(id => map.get(id)).filter(Boolean);
-        renderRules();
-      } else {
-        await refresh();
+      draggedRuleId = null;
+      if (categoryDropHandled) {
+        categoryDropHandled = false;
+        return;
       }
+      const ids = Array.from(els.rulesList.querySelectorAll('.item')).map(el => el.dataset.id);
+      const resp = await sendMessage({
+        type: 'reorder-rules',
+        ids,
+        categoryId: selectedCategoryId || null
+      });
+      if (!resp || !resp.ok) {
+        await refresh();
+        return;
+      }
+      await refresh();
     });
 
     const top = document.createElement('div');
@@ -258,7 +426,7 @@ function renderRules() {
     const btnDelete = document.createElement('button');
     btnDelete.className = 'btn danger';
     btnDelete.textContent = 'Delete';
-    btnDelete.addEventListener('click', () => confirmDelete(r));
+    btnDelete.addEventListener('click', () => confirmDeleteRule(r));
 
     actions.appendChild(toggle);
     actions.appendChild(btnEdit);
@@ -299,6 +467,7 @@ function openRuleModal(existing, duplicate = false) {
     els.destination.value = existing.destination;
     els.ruleId.value = duplicate ? '' : existing.id;
     currentRuleEnabled = existing.enabled;
+    renderCategoryOptions(getRuleCategoryId(existing));
   } else {
     els.ruleModalTitle.textContent = 'Create Rule';
     els.name.value = '';
@@ -307,25 +476,90 @@ function openRuleModal(existing, duplicate = false) {
     els.destination.value = '';
     els.ruleId.value = '';
     currentRuleEnabled = true;
+    renderCategoryOptions(selectedCategoryId);
   }
   updateSourcePlaceholder();
   els.ruleModal.showModal();
 }
 
-function confirmDelete(r) {
-  pendingDeleteId = r.id;
-  els.confirmText.textContent = `Delete rule “${r.name}”?`;
+function openCategoryModal(category = null) {
+  clearCategoryErrors();
+  if (category) {
+    els.categoryModalTitle.textContent = 'Category Settings';
+    els.categoryId.value = category.id;
+    els.categoryName.value = category.name;
+    els.btnDeleteCategory.hidden = false;
+  } else {
+    els.categoryModalTitle.textContent = 'Create Category';
+    els.categoryId.value = '';
+    els.categoryName.value = '';
+    els.btnDeleteCategory.hidden = true;
+  }
+  els.categoryModal.showModal();
+}
+
+function openConfirm(text, onYes) {
+  pendingConfirm = onYes;
+  els.confirmText.textContent = text;
   els.confirmModal.showModal();
 }
 
-els.btnNo.addEventListener('click', () => { pendingDeleteId = null; els.confirmModal.close(); });
-els.btnYes.addEventListener('click', async () => {
-  if (pendingDeleteId) {
-    await sendMessage({ type: 'delete-rule', id: pendingDeleteId });
-    pendingDeleteId = null;
-    els.confirmModal.close();
+function confirmDeleteRule(rule) {
+  openConfirm(`Delete rule "${rule.name}"?`, async () => {
+    await sendMessage({ type: 'delete-rule', id: rule.id });
     await refresh();
+  });
+}
+
+function beginCategoryDelete(mode) {
+  if (!pendingCategoryDelete) return;
+  const { category, count } = pendingCategoryDelete;
+  let action = `Delete category "${category.name}"?`;
+  if (count > 0 && mode === 'deleteRules') {
+    action = `Delete category "${category.name}" and all assigned rules?`;
+  } else if (count > 0) {
+    action = `Delete category "${category.name}" and move assigned rules to Uncategorized?`;
   }
+  els.categoryDeleteChoiceModal.close();
+  openConfirm(action, async () => {
+    const resp = await sendMessage({
+      type: 'delete-category',
+      categoryId: category.id,
+      mode
+    });
+    if (!resp || !resp.ok) {
+      alert('Failed to delete category: ' + (resp && resp.error || 'unknown'));
+      return;
+    }
+    pendingCategoryDelete = null;
+    selectedCategoryId = UNCATEGORIZED_ID;
+    els.categoryModal.close();
+    await refresh();
+  });
+}
+
+function requestCategoryDelete(category) {
+  const counts = getCategoryCounts(category.id);
+  pendingCategoryDelete = { category, count: counts.total };
+  if (counts.total === 0) {
+    beginCategoryDelete('moveRulesToUncategorized');
+    return;
+  }
+
+  els.categoryDeleteChoiceText.textContent = `Category "${category.name}" contains ${counts.total} rule${counts.total === 1 ? '' : 's'}.`;
+  els.categoryDeleteChoiceModal.showModal();
+}
+
+els.btnNo.addEventListener('click', () => {
+  pendingConfirm = null;
+  els.confirmModal.close();
+});
+
+els.btnYes.addEventListener('click', async () => {
+  const onYes = pendingConfirm;
+  pendingConfirm = null;
+  els.confirmModal.close();
+  if (onYes) await onYes();
 });
 
 els.ruleForm.addEventListener('submit', async (e) => {
@@ -335,6 +569,7 @@ els.ruleForm.addEventListener('submit', async (e) => {
     id: els.ruleId.value || undefined,
     name: els.name.value.trim(),
     mode: els.mode.value,
+    categoryId: els.category.value || null,
     source: els.source.value.trim(),
     destination: els.destination.value.trim(),
     enabled: currentRuleEnabled
@@ -373,14 +608,55 @@ els.ruleForm.addEventListener('submit', async (e) => {
   els.ruleModal.close();
 });
 
+els.categoryForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  clearCategoryErrors();
+  const category = {
+    id: els.categoryId.value || undefined,
+    name: els.categoryName.value.trim()
+  };
+  if (!category.name) {
+    els.categoryNameError.textContent = 'Name is required';
+    return;
+  }
+
+  const resp = await sendMessage({ type: 'save-category', category });
+  if (!resp || !resp.ok) {
+    els.categoryNameError.textContent = resp && resp.error || 'Failed to save category';
+    return;
+  }
+  selectedCategoryId = resp.category.id;
+  await refresh();
+  els.categoryModal.close();
+});
+
+els.btnDeleteCategory.addEventListener('click', () => {
+  const category = getCategoryById(els.categoryId.value);
+  if (category) requestCategoryDelete(category);
+});
+
+els.btnCancelCategoryDeleteChoice.addEventListener('click', () => {
+  pendingCategoryDelete = null;
+  els.categoryDeleteChoiceModal.close();
+});
+
+els.btnMoveRulesToUncategorized.addEventListener('click', () => beginCategoryDelete('moveRulesToUncategorized'));
+els.btnDeleteCategoryRules.addEventListener('click', () => beginCategoryDelete('deleteRules'));
+
 // Cancel in rule modal
 els.btnCancelRule.addEventListener('click', (e) => {
   e.preventDefault();
   els.ruleModal.close();
 });
 
+els.btnCancelCategory.addEventListener('click', (e) => {
+  e.preventDefault();
+  els.categoryModal.close();
+});
+
 // New
 els.btnNew.addEventListener('click', () => openRuleModal(null));
+els.btnNewCategory.addEventListener('click', () => openCategoryModal(null));
 
 // Global toggle
 els.globalToggle.addEventListener('change', async () => {
@@ -391,7 +667,7 @@ els.globalToggle.addEventListener('change', async () => {
 // Export
 els.btnExport.addEventListener('click', async () => {
   const resp = await sendMessage({ type: 'export-rules' });
-  const data = (resp && resp.rules) || [];
+  const data = resp && resp.data ? resp.data : (resp && resp.rules) || [];
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
