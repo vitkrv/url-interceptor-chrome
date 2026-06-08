@@ -1,0 +1,5 @@
+{
+  "scripts": {
+    "build": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build.ps1"
+  }
+}
