@@ -31,15 +31,8 @@ const STORAGE_KEYS = {
 };
 
 const LOG_LIMIT = 1000; // keep last N logs
-const DEBUGGER_PROTOCOL_VERSION = "1.3";
-const PW_BOT_SCORE_PATTERN = /\bwindow\._pwBotScore\s*=\s*\d+\b/g;
-const PW_BOT_SCORE_REPLACEMENT = "window._pwBotScore=99";
-const PW_BOT_REWRITE_WINDOW_MS = 30000;
-const UNSAFE_FULFILL_RESPONSE_HEADERS = new Set([
-  "content-encoding",
-  "content-length",
-  "transfer-encoding"
-]);
+const PW_BOT_CONTENT_SCRIPT_ID = "pw-bot-accessor";
+const PW_BOT_CONTENT_SCRIPT_FILE = "content/pw-bot-accessor.js";
 const DNR_RESOURCE_TYPES = [
   "main_frame",
   "sub_frame",
@@ -57,8 +50,7 @@ const DNR_RESOURCE_TYPES = [
 ];
 
 let logWriteQueue = Promise.resolve();
-const attachedDebugTabs = new Set();
-const pendingPwBotRewrites = new Map();
+const activePwBotFrames = new Map();
 
 async function getState() {
   const data = await chrome.storage.local.get({
@@ -84,82 +76,15 @@ function normalizeRuleForClient(rule) {
   };
 }
 
-function hasEnabledPwBotRewriteRule(state) {
+function getEnabledPwBotOverrideRuleIds(state) {
   const globalEnabled = state[STORAGE_KEYS.GLOBAL_ENABLED] !== false;
+  if (!globalEnabled) return new Set();
   const rules = state[STORAGE_KEYS.RULES] || [];
-  return globalEnabled && rules.some(rule => !!rule.enabled && !!rule.disablePwBotDetection);
-}
-
-function normalizeUrlForRewriteMatch(rawUrl) {
-  try {
-    const url = new URL(rawUrl);
-    url.hash = "";
-    return url.toString();
-  } catch {
-    return String(rawUrl || "").split("#")[0];
-  }
-}
-
-function encodeUtf8Base64(value) {
-  const bytes = new TextEncoder().encode(value);
-  let binary = "";
-  for (let i = 0; i < bytes.length; i += 0x8000) {
-    binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
-  }
-  return btoa(binary);
-}
-
-function decodeUtf8Base64(value) {
-  const binary = atob(value);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i += 1) {
-    bytes[i] = binary.charCodeAt(i);
-  }
-  return new TextDecoder("utf-8").decode(bytes);
-}
-
-function sanitizeResponseHeaders(headers) {
-  return (Array.isArray(headers) ? headers : [])
-    .filter(header => {
-      const name = String(header && header.name || "").toLowerCase();
-      return name && !UNSAFE_FULFILL_RESPONSE_HEADERS.has(name);
-    })
-    .map(header => ({ name: String(header.name), value: String(header.value || "") }));
-}
-
-function getPendingRewriteEntries(tabId) {
-  const entries = pendingPwBotRewrites.get(tabId) || [];
-  const now = Date.now();
-  const active = entries.filter(entry => entry.expiresAt > now);
-  if (active.length) pendingPwBotRewrites.set(tabId, active);
-  else pendingPwBotRewrites.delete(tabId);
-  return active;
-}
-
-function queuePwBotRewrite(tabId, destinationUrl, ruleName) {
-  if (typeof tabId !== "number" || tabId < 0) return;
-  const targetUrl = normalizeUrlForRewriteMatch(destinationUrl);
-  if (!targetUrl) return;
-
-  const entries = getPendingRewriteEntries(tabId);
-  entries.push({
-    targetUrl,
-    ruleName,
-    expiresAt: Date.now() + PW_BOT_REWRITE_WINDOW_MS
-  });
-  pendingPwBotRewrites.set(tabId, entries);
-}
-
-function consumePwBotRewrite(tabId, requestUrl) {
-  const targetUrl = normalizeUrlForRewriteMatch(requestUrl);
-  const entries = getPendingRewriteEntries(tabId);
-  const index = entries.findIndex(entry => entry.targetUrl === targetUrl);
-  if (index < 0) return null;
-
-  const [entry] = entries.splice(index, 1);
-  if (entries.length) pendingPwBotRewrites.set(tabId, entries);
-  else pendingPwBotRewrites.delete(tabId);
-  return entry;
+  return new Set(
+    rules
+      .filter(rule => !!rule.enabled && !!rule.disablePwBotDetection)
+      .map(rule => rule.id)
+  );
 }
 
 function normalizeCategoryName(name) {
@@ -266,108 +191,175 @@ async function appendLog(entry) {
   await logWriteQueue;
 }
 
-async function continuePausedRequest(session, requestId) {
-  await chrome.debugger.sendCommand(session, "Fetch.continueRequest", { requestId }).catch(() => {});
-}
+function setPwBotAccessorActive(active) {
+  const stateKey = "__urlRedirectorPwBotDetectionState__";
+  const apiKey = "__urlRedirectorPwBotDetectionApi__";
+  const scoreKey = "_pwBotScore";
 
-async function handleFetchRequestPaused(session, params) {
-  const tabId = session.tabId;
-  const requestId = params && params.requestId;
-  if (typeof tabId !== "number" || !requestId) return;
+  const state = window[stateKey] || {
+    active: false,
+    hasValue: Object.prototype.hasOwnProperty.call(window, scoreKey),
+    value: window[scoreKey]
+  };
 
-  if (!params.responseStatusCode) {
-    await continuePausedRequest(session, requestId);
-    return;
+  function readScore() {
+    return state.active ? 99 : state.value;
   }
 
-  const rewrite = consumePwBotRewrite(tabId, params.request && params.request.url);
-  if (!rewrite) {
-    await continuePausedRequest(session, requestId);
-    return;
+  function writeScore(value) {
+    state.hasValue = true;
+    state.value = value;
   }
 
-  try {
-    const responseBody = await chrome.debugger.sendCommand(session, "Fetch.getResponseBody", { requestId });
-    const originalBody = responseBody && responseBody.base64Encoded
-      ? decodeUtf8Base64(responseBody.body || "")
-      : String(responseBody && responseBody.body || "");
-    const nextBody = originalBody.replace(PW_BOT_SCORE_PATTERN, PW_BOT_SCORE_REPLACEMENT);
-    await chrome.debugger.sendCommand(session, "Fetch.fulfillRequest", {
-      requestId,
-      responseCode: params.responseStatusCode || 200,
-      responsePhrase: params.responseStatusText || undefined,
-      responseHeaders: sanitizeResponseHeaders(params.responseHeaders),
-      body: encodeUtf8Base64(nextBody)
-    });
-
-    if (nextBody !== originalBody) {
-      await appendLog({
-        time: new Date().toISOString(),
-        info: `PW Bot Detection disabled for rule [${rewrite.ruleName}]`
+  function install() {
+    try {
+      Object.defineProperty(window, scoreKey, {
+        configurable: true,
+        enumerable: true,
+        get: readScore,
+        set: writeScore
       });
-      await chrome.runtime.sendMessage({ type: "logs-updated" }).catch(() => {});
+    } catch {
+      return false;
     }
-  } catch {
-    await continuePausedRequest(session, requestId);
-  }
-}
-
-async function attachDebuggerToTab(tabId) {
-  if (attachedDebugTabs.has(tabId)) return true;
-
-  const debuggee = { tabId };
-  try {
-    await chrome.debugger.attach(debuggee, DEBUGGER_PROTOCOL_VERSION);
-    await chrome.debugger.sendCommand(debuggee, "Fetch.enable", {
-      patterns: [{
-        urlPattern: "*",
-        resourceType: "Script",
-        requestStage: "Response"
-      }]
-    });
-    attachedDebugTabs.add(tabId);
     return true;
-  } catch {
-    attachedDebugTabs.delete(tabId);
-    await chrome.debugger.detach(debuggee).catch(() => {});
-    return false;
   }
+
+  const api = window[apiKey] || {
+    install,
+    activate() {
+      state.active = true;
+      return install();
+    },
+    deactivate() {
+      state.active = false;
+      return install();
+    },
+    isActive() {
+      return state.active;
+    }
+  };
+
+  Object.defineProperty(window, stateKey, {
+    configurable: true,
+    value: state
+  });
+  Object.defineProperty(window, apiKey, {
+    configurable: true,
+    value: api
+  });
+
+  if (active) return api.activate();
+  return api.deactivate();
 }
 
-async function detachDebuggerFromTab(tabId) {
-  if (!attachedDebugTabs.has(tabId)) return;
-
-  const debuggee = { tabId };
-  attachedDebugTabs.delete(tabId);
-  pendingPwBotRewrites.delete(tabId);
-  await chrome.debugger.sendCommand(debuggee, "Fetch.disable").catch(() => {});
-  await chrome.debugger.detach(debuggee).catch(() => {});
+function rememberActivePwBotFrames(tabId, results, ruleId) {
+  if (typeof tabId !== "number" || !Array.isArray(results) || !ruleId) return;
+  const frameMap = activePwBotFrames.get(tabId) || new Map();
+  for (const result of results) {
+    if (result && typeof result.frameId === "number") {
+      const ruleIds = frameMap.get(result.frameId) || new Set();
+      ruleIds.add(ruleId);
+      frameMap.set(result.frameId, ruleIds);
+    }
+  }
+  if (frameMap.size) activePwBotFrames.set(tabId, frameMap);
 }
 
-async function detachAllPwBotDebuggers() {
-  const tabIds = Array.from(attachedDebugTabs);
-  await Promise.all(tabIds.map(tabId => detachDebuggerFromTab(tabId)));
-  pendingPwBotRewrites.clear();
+async function setPwBotOverrideForTarget(tabId, active, frameId = null, ruleId = null) {
+  if (typeof tabId !== "number" || tabId < 0) return [];
+
+  const target = { tabId };
+  if (typeof frameId === "number" && frameId >= 0) {
+    target.frameIds = [frameId];
+  } else {
+    target.allFrames = true;
+  }
+
+  const results = await chrome.scripting.executeScript({
+    target,
+    world: "MAIN",
+    func: setPwBotAccessorActive,
+    args: [active]
+  }).catch(() => []);
+
+  if (active) rememberActivePwBotFrames(tabId, results, ruleId);
+  return results;
 }
 
-async function syncPwBotDebuggers(state = null) {
-  const currentState = state || await getState();
-  if (!hasEnabledPwBotRewriteRule(currentState)) {
-    await detachAllPwBotDebuggers();
+async function activatePwBotOverride(tabId, frameId, rule) {
+  const results = await setPwBotOverrideForTarget(tabId, true, frameId, rule && rule.id);
+  if (!results.length) return;
+
+  await appendLog({
+    time: new Date().toISOString(),
+    info: `PW Bot Detection override activated for rule [${rule.name}]`
+  });
+  await chrome.runtime.sendMessage({ type: "logs-updated" }).catch(() => {});
+}
+
+async function deactivateStalePwBotOverrides(activeRuleIds) {
+  if (activeRuleIds.size === 0) {
+    const tabs = await chrome.tabs.query({}).catch(() => []);
+    await Promise.all(tabs
+      .filter(tab => typeof tab.id === "number")
+      .map(tab => setPwBotOverrideForTarget(tab.id, false)));
+    activePwBotFrames.clear();
     return;
   }
 
-  const targets = await chrome.debugger.getTargets().catch(() => []);
-  await Promise.all(targets
-    .filter(target => target.type === "page" && typeof target.tabId === "number" && (!target.attached || attachedDebugTabs.has(target.tabId)))
-    .map(target => attachDebuggerToTab(target.tabId)));
+  const entries = Array.from(activePwBotFrames.entries());
+  for (const [tabId, frameMap] of entries) {
+    for (const [frameId, ruleIds] of Array.from(frameMap.entries())) {
+      for (const ruleId of Array.from(ruleIds)) {
+        if (!activeRuleIds.has(ruleId)) ruleIds.delete(ruleId);
+      }
+      if (ruleIds.size === 0) {
+        frameMap.delete(frameId);
+        await setPwBotOverrideForTarget(tabId, false, frameId);
+      }
+    }
+    if (frameMap.size === 0) {
+      activePwBotFrames.delete(tabId);
+    }
+  }
 }
 
-async function maybeAttachDebuggerToTab(tabId) {
-  const state = await getState();
-  if (hasEnabledPwBotRewriteRule(state)) {
-    await attachDebuggerToTab(tabId);
+async function isPwBotAccessorRegistered() {
+  const scripts = await chrome.scripting
+    .getRegisteredContentScripts({ ids: [PW_BOT_CONTENT_SCRIPT_ID] })
+    .catch(() => []);
+  return scripts.some(script => script.id === PW_BOT_CONTENT_SCRIPT_ID);
+}
+
+async function registerPwBotAccessor() {
+  if (await isPwBotAccessorRegistered()) return;
+  await chrome.scripting.registerContentScripts([{
+    id: PW_BOT_CONTENT_SCRIPT_ID,
+    js: [PW_BOT_CONTENT_SCRIPT_FILE],
+    matches: ["<all_urls>"],
+    runAt: "document_start",
+    world: "MAIN",
+    allFrames: true,
+    persistAcrossSessions: false
+  }]).catch(() => {});
+}
+
+async function unregisterPwBotAccessor() {
+  await chrome.scripting.unregisterContentScripts({ ids: [PW_BOT_CONTENT_SCRIPT_ID] }).catch(() => {});
+}
+
+async function syncPwBotAccessor(state = null) {
+  const currentState = state || await getState();
+  const activeRuleIds = getEnabledPwBotOverrideRuleIds(currentState);
+
+  if (activeRuleIds.size > 0) {
+    await registerPwBotAccessor();
+  } else {
+    await unregisterPwBotAccessor();
   }
+
+  await deactivateStalePwBotOverrides(activeRuleIds);
 }
 
 // Build a DNR rule and an install status.
@@ -455,7 +447,7 @@ async function rebuildDnrRules() {
       statuses[r.id] = makeRuleStatus(true, r.enabled ? "Global disabled" : "Disabled");
     }
     await setState({ [STORAGE_KEYS.RULE_STATUSES]: statuses });
-    await syncPwBotDebuggers({
+    await syncPwBotAccessor({
       ...state,
       [STORAGE_KEYS.RULE_STATUSES]: statuses
     });
@@ -501,7 +493,7 @@ async function rebuildDnrRules() {
     [STORAGE_KEYS.NEXT_DNR_ID]: state[STORAGE_KEYS.NEXT_DNR_ID],
     [STORAGE_KEYS.RULE_STATUSES]: statuses
   });
-  await syncPwBotDebuggers({
+  await syncPwBotAccessor({
     ...state,
     [STORAGE_KEYS.MAP]: idMap,
     [STORAGE_KEYS.RULE_STATUSES]: statuses
@@ -532,10 +524,8 @@ chrome.declarativeNetRequest.onRuleMatchedDebug.addListener(async (info) => {
 
     if (matchedRule.disablePwBotDetection) {
       const tabId = info.request && info.request.tabId;
-      queuePwBotRewrite(tabId, matchedRule.destination, matchedRule.name);
-      if (typeof tabId === "number" && tabId >= 0) {
-        await attachDebuggerToTab(tabId);
-      }
+      const frameId = info.request && info.request.frameId;
+      await activatePwBotOverride(tabId, frameId, matchedRule);
     }
 
     const ts = new Date().toISOString();
@@ -550,28 +540,8 @@ chrome.declarativeNetRequest.onRuleMatchedDebug.addListener(async (info) => {
 });
 }
 
-chrome.debugger.onEvent.addListener((source, method, params) => {
-  if (method === "Fetch.requestPaused") {
-    handleFetchRequestPaused(source, params);
-  }
-});
-
-chrome.debugger.onDetach.addListener((source) => {
-  if (source && typeof source.tabId === "number") {
-    attachedDebugTabs.delete(source.tabId);
-    pendingPwBotRewrites.delete(source.tabId);
-  }
-});
-
-chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
-  if (changeInfo && changeInfo.status === "loading") {
-    maybeAttachDebuggerToTab(tabId);
-  }
-});
-
 chrome.tabs.onRemoved.addListener((tabId) => {
-  attachedDebugTabs.delete(tabId);
-  pendingPwBotRewrites.delete(tabId);
+  activePwBotFrames.delete(tabId);
 });
 
 // Messages from options UI

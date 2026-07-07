@@ -393,7 +393,7 @@ function renderRules() {
     meta.appendChild(ruleBadge(r.mode));
     meta.appendChild(statusBadge(r));
     if (r.disablePwBotDetection) {
-      meta.appendChild(createBadge('PW Bot disabled', 'cyan'));
+      meta.appendChild(createBadge('Bot Detection disabled', 'orange'));
     }
     info.appendChild(name);
     info.appendChild(meta);

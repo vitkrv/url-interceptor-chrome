@@ -14,6 +14,7 @@ New-Item -ItemType Directory -Path $packageRoot | Out-Null
 $itemsToCopy = @(
     'manifest.json',
     'background',
+    'content',
     'icons',
     'options',
     'popup'
