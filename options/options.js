@@ -22,6 +22,7 @@ const els = {
   category: document.getElementById('category'),
   source: document.getElementById('source'),
   destination: document.getElementById('destination'),
+  disablePwBotDetection: document.getElementById('disablePwBotDetection'),
   nameError: document.getElementById('nameError'),
   sourceError: document.getElementById('sourceError'),
   destinationError: document.getElementById('destinationError'),
@@ -391,6 +392,9 @@ function renderRules() {
     meta.className = 'meta';
     meta.appendChild(ruleBadge(r.mode));
     meta.appendChild(statusBadge(r));
+    if (r.disablePwBotDetection) {
+      meta.appendChild(createBadge('PW Bot disabled', 'cyan'));
+    }
     info.appendChild(name);
     info.appendChild(meta);
     left.appendChild(info);
@@ -465,6 +469,7 @@ function openRuleModal(existing, duplicate = false) {
     els.mode.value = existing.mode;
     els.source.value = existing.source;
     els.destination.value = existing.destination;
+    els.disablePwBotDetection.checked = !!existing.disablePwBotDetection;
     els.ruleId.value = duplicate ? '' : existing.id;
     currentRuleEnabled = existing.enabled;
     renderCategoryOptions(getRuleCategoryId(existing));
@@ -474,6 +479,7 @@ function openRuleModal(existing, duplicate = false) {
     els.mode.value = 'exact';
     els.source.value = '';
     els.destination.value = '';
+    els.disablePwBotDetection.checked = false;
     els.ruleId.value = '';
     currentRuleEnabled = true;
     renderCategoryOptions(selectedCategoryId);
@@ -572,6 +578,7 @@ els.ruleForm.addEventListener('submit', async (e) => {
     categoryId: els.category.value || null,
     source: els.source.value.trim(),
     destination: els.destination.value.trim(),
+    disablePwBotDetection: els.disablePwBotDetection.checked,
     enabled: currentRuleEnabled
   };
   const errors = {};

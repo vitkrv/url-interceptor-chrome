@@ -13,6 +13,7 @@
  *   source: string,
  *   destination: string,
  *   enabled: boolean,
+ *   disablePwBotDetection: boolean,
  *   categoryId: string | null // optional; missing/null means Uncategorized
  * }
  *
@@ -30,6 +31,15 @@ const STORAGE_KEYS = {
 };
 
 const LOG_LIMIT = 1000; // keep last N logs
+const DEBUGGER_PROTOCOL_VERSION = "1.3";
+const PW_BOT_SCORE_PATTERN = /\bwindow\._pwBotScore\s*=\s*\d+\b/g;
+const PW_BOT_SCORE_REPLACEMENT = "window._pwBotScore=99";
+const PW_BOT_REWRITE_WINDOW_MS = 30000;
+const UNSAFE_FULFILL_RESPONSE_HEADERS = new Set([
+  "content-encoding",
+  "content-length",
+  "transfer-encoding"
+]);
 const DNR_RESOURCE_TYPES = [
   "main_frame",
   "sub_frame",
@@ -47,6 +57,8 @@ const DNR_RESOURCE_TYPES = [
 ];
 
 let logWriteQueue = Promise.resolve();
+const attachedDebugTabs = new Set();
+const pendingPwBotRewrites = new Map();
 
 async function getState() {
   const data = await chrome.storage.local.get({
@@ -63,6 +75,91 @@ async function getState() {
 
 async function setState(patch) {
   return chrome.storage.local.set(patch);
+}
+
+function normalizeRuleForClient(rule) {
+  return {
+    ...rule,
+    disablePwBotDetection: !!(rule && rule.disablePwBotDetection)
+  };
+}
+
+function hasEnabledPwBotRewriteRule(state) {
+  const globalEnabled = state[STORAGE_KEYS.GLOBAL_ENABLED] !== false;
+  const rules = state[STORAGE_KEYS.RULES] || [];
+  return globalEnabled && rules.some(rule => !!rule.enabled && !!rule.disablePwBotDetection);
+}
+
+function normalizeUrlForRewriteMatch(rawUrl) {
+  try {
+    const url = new URL(rawUrl);
+    url.hash = "";
+    return url.toString();
+  } catch {
+    return String(rawUrl || "").split("#")[0];
+  }
+}
+
+function encodeUtf8Base64(value) {
+  const bytes = new TextEncoder().encode(value);
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  }
+  return btoa(binary);
+}
+
+function decodeUtf8Base64(value) {
+  const binary = atob(value);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return new TextDecoder("utf-8").decode(bytes);
+}
+
+function sanitizeResponseHeaders(headers) {
+  return (Array.isArray(headers) ? headers : [])
+    .filter(header => {
+      const name = String(header && header.name || "").toLowerCase();
+      return name && !UNSAFE_FULFILL_RESPONSE_HEADERS.has(name);
+    })
+    .map(header => ({ name: String(header.name), value: String(header.value || "") }));
+}
+
+function getPendingRewriteEntries(tabId) {
+  const entries = pendingPwBotRewrites.get(tabId) || [];
+  const now = Date.now();
+  const active = entries.filter(entry => entry.expiresAt > now);
+  if (active.length) pendingPwBotRewrites.set(tabId, active);
+  else pendingPwBotRewrites.delete(tabId);
+  return active;
+}
+
+function queuePwBotRewrite(tabId, destinationUrl, ruleName) {
+  if (typeof tabId !== "number" || tabId < 0) return;
+  const targetUrl = normalizeUrlForRewriteMatch(destinationUrl);
+  if (!targetUrl) return;
+
+  const entries = getPendingRewriteEntries(tabId);
+  entries.push({
+    targetUrl,
+    ruleName,
+    expiresAt: Date.now() + PW_BOT_REWRITE_WINDOW_MS
+  });
+  pendingPwBotRewrites.set(tabId, entries);
+}
+
+function consumePwBotRewrite(tabId, requestUrl) {
+  const targetUrl = normalizeUrlForRewriteMatch(requestUrl);
+  const entries = getPendingRewriteEntries(tabId);
+  const index = entries.findIndex(entry => entry.targetUrl === targetUrl);
+  if (index < 0) return null;
+
+  const [entry] = entries.splice(index, 1);
+  if (entries.length) pendingPwBotRewrites.set(tabId, entries);
+  else pendingPwBotRewrites.delete(tabId);
+  return entry;
 }
 
 function normalizeCategoryName(name) {
@@ -169,6 +266,110 @@ async function appendLog(entry) {
   await logWriteQueue;
 }
 
+async function continuePausedRequest(session, requestId) {
+  await chrome.debugger.sendCommand(session, "Fetch.continueRequest", { requestId }).catch(() => {});
+}
+
+async function handleFetchRequestPaused(session, params) {
+  const tabId = session.tabId;
+  const requestId = params && params.requestId;
+  if (typeof tabId !== "number" || !requestId) return;
+
+  if (!params.responseStatusCode) {
+    await continuePausedRequest(session, requestId);
+    return;
+  }
+
+  const rewrite = consumePwBotRewrite(tabId, params.request && params.request.url);
+  if (!rewrite) {
+    await continuePausedRequest(session, requestId);
+    return;
+  }
+
+  try {
+    const responseBody = await chrome.debugger.sendCommand(session, "Fetch.getResponseBody", { requestId });
+    const originalBody = responseBody && responseBody.base64Encoded
+      ? decodeUtf8Base64(responseBody.body || "")
+      : String(responseBody && responseBody.body || "");
+    const nextBody = originalBody.replace(PW_BOT_SCORE_PATTERN, PW_BOT_SCORE_REPLACEMENT);
+    await chrome.debugger.sendCommand(session, "Fetch.fulfillRequest", {
+      requestId,
+      responseCode: params.responseStatusCode || 200,
+      responsePhrase: params.responseStatusText || undefined,
+      responseHeaders: sanitizeResponseHeaders(params.responseHeaders),
+      body: encodeUtf8Base64(nextBody)
+    });
+
+    if (nextBody !== originalBody) {
+      await appendLog({
+        time: new Date().toISOString(),
+        info: `PW Bot Detection disabled for rule [${rewrite.ruleName}]`
+      });
+      await chrome.runtime.sendMessage({ type: "logs-updated" }).catch(() => {});
+    }
+  } catch {
+    await continuePausedRequest(session, requestId);
+  }
+}
+
+async function attachDebuggerToTab(tabId) {
+  if (attachedDebugTabs.has(tabId)) return true;
+
+  const debuggee = { tabId };
+  try {
+    await chrome.debugger.attach(debuggee, DEBUGGER_PROTOCOL_VERSION);
+    await chrome.debugger.sendCommand(debuggee, "Fetch.enable", {
+      patterns: [{
+        urlPattern: "*",
+        resourceType: "Script",
+        requestStage: "Response"
+      }]
+    });
+    attachedDebugTabs.add(tabId);
+    return true;
+  } catch {
+    attachedDebugTabs.delete(tabId);
+    await chrome.debugger.detach(debuggee).catch(() => {});
+    return false;
+  }
+}
+
+async function detachDebuggerFromTab(tabId) {
+  if (!attachedDebugTabs.has(tabId)) return;
+
+  const debuggee = { tabId };
+  attachedDebugTabs.delete(tabId);
+  pendingPwBotRewrites.delete(tabId);
+  await chrome.debugger.sendCommand(debuggee, "Fetch.disable").catch(() => {});
+  await chrome.debugger.detach(debuggee).catch(() => {});
+}
+
+async function detachAllPwBotDebuggers() {
+  const tabIds = Array.from(attachedDebugTabs);
+  await Promise.all(tabIds.map(tabId => detachDebuggerFromTab(tabId)));
+  pendingPwBotRewrites.clear();
+}
+
+async function syncPwBotDebuggers(state = null) {
+  const currentState = state || await getState();
+  if (!hasEnabledPwBotRewriteRule(currentState)) {
+    await detachAllPwBotDebuggers();
+    return;
+  }
+
+  const targets = await chrome.debugger.getTargets().catch(() => []);
+  await Promise.all(targets
+    .filter(target => target.type === "page" && typeof target.tabId === "number" && (!target.attached || attachedDebugTabs.has(target.tabId)))
+    .map(target => attachDebuggerToTab(target.tabId)));
+}
+
+async function maybeAttachDebuggerToTab(tabId) {
+  const state = await getState();
+  if (hasEnabledPwBotRewriteRule(state)) {
+    await attachDebuggerToTab(tabId);
+  }
+}
+
 // Build a DNR rule and an install status.
 async function toDnrRule(rule, dnrId) {
   const sourceError = getSourceValidationError(rule.source, rule.mode);
@@ -254,6 +455,10 @@ async function rebuildDnrRules() {
       statuses[r.id] = makeRuleStatus(true, r.enabled ? "Global disabled" : "Disabled");
     }
     await setState({ [STORAGE_KEYS.RULE_STATUSES]: statuses });
+    await syncPwBotDebuggers({
+      ...state,
+      [STORAGE_KEYS.RULE_STATUSES]: statuses
+    });
     return;
   }
 
@@ -296,6 +501,11 @@ async function rebuildDnrRules() {
     [STORAGE_KEYS.NEXT_DNR_ID]: state[STORAGE_KEYS.NEXT_DNR_ID],
     [STORAGE_KEYS.RULE_STATUSES]: statuses
   });
+  await syncPwBotDebuggers({
+    ...state,
+    [STORAGE_KEYS.MAP]: idMap,
+    [STORAGE_KEYS.RULE_STATUSES]: statuses
+  });
 }
 
 // Listen to rule matches for logging when the debug API is available.
@@ -320,6 +530,14 @@ chrome.declarativeNetRequest.onRuleMatchedDebug.addListener(async (info) => {
     }
     if (!matchedRule || !matchedRule.enabled) return;
 
+    if (matchedRule.disablePwBotDetection) {
+      const tabId = info.request && info.request.tabId;
+      queuePwBotRewrite(tabId, matchedRule.destination, matchedRule.name);
+      if (typeof tabId === "number" && tabId >= 0) {
+        await attachDebuggerToTab(tabId);
+      }
+    }
+
     const ts = new Date().toISOString();
     const pageUrl = redactUrlForLog(info.request.url);
 
@@ -331,6 +549,30 @@ chrome.declarativeNetRequest.onRuleMatchedDebug.addListener(async (info) => {
   }
 });
 }
+
+chrome.debugger.onEvent.addListener((source, method, params) => {
+  if (method === "Fetch.requestPaused") {
+    handleFetchRequestPaused(source, params);
+  }
+});
+
+chrome.debugger.onDetach.addListener((source) => {
+  if (source && typeof source.tabId === "number") {
+    attachedDebugTabs.delete(source.tabId);
+    pendingPwBotRewrites.delete(source.tabId);
+  }
+});
+
+chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+  if (changeInfo && changeInfo.status === "loading") {
+    maybeAttachDebuggerToTab(tabId);
+  }
+});
+
+chrome.tabs.onRemoved.addListener((tabId) => {
+  attachedDebugTabs.delete(tabId);
+  pendingPwBotRewrites.delete(tabId);
+});
 
 // Messages from options UI
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
@@ -345,7 +587,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         state = await getState();
       }
       sendResponse({
-        rules: state[STORAGE_KEYS.RULES] || [],
+        rules: (state[STORAGE_KEYS.RULES] || []).map(normalizeRuleForClient),
         categories: normalizeCategories(state[STORAGE_KEYS.CATEGORIES]),
         globalEnabled: state[STORAGE_KEYS.GLOBAL_ENABLED] !== false,
         logs: state[STORAGE_KEYS.LOGS] || [],
@@ -386,6 +628,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         return;
       }
       if (typeof r.enabled !== "boolean") r.enabled = true;
+      r.disablePwBotDetection = !!r.disablePwBotDetection;
       r.categoryId = getCategoryId(r.categoryId, categories);
 
       const rules = current.slice();
@@ -573,7 +816,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       const state = await getState();
       const data = {
         categories: normalizeCategories(state[STORAGE_KEYS.CATEGORIES]),
-        rules: state[STORAGE_KEYS.RULES] || []
+        rules: (state[STORAGE_KEYS.RULES] || []).map(normalizeRuleForClient)
       };
       sendResponse({ ok: true, data, rules: data.rules });
       return;
@@ -614,6 +857,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           destination,
           mode,
           enabled: typeof r.enabled === "boolean" ? r.enabled : true,
+          disablePwBotDetection: !!r.disablePwBotDetection,
           categoryId: categoryMap.get(r.categoryId) || null
         });
       }

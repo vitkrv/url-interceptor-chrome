@@ -99,6 +99,17 @@ body{
   background:#10141c; color:var(--c-text); border:1px solid rgba(255,255,255,.12);
   border-radius:10px; padding:10px 12px; outline:none;
 }
+.modal .switch-field{
+  flex-direction:row;
+  align-items:center;
+  justify-content:space-between;
+  gap:16px;
+  background:#10141c;
+  border:1px solid rgba(255,255,255,.12);
+  border-radius:10px;
+  padding:10px 12px;
+}
+.modal .switch-field .switch{flex:none}
 .error{ color:var(--c-danger); font-size:12px; margin-top:4px }
 .modal .hint{margin-top:6px; color:var(--c-muted)}
 

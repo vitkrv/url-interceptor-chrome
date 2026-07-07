@@ -9,6 +9,7 @@ A Chrome extension that intercepts and redirects URLs using user-defined rules. 
 - Import/Export rules and categories as JSON
 - Live **Logs** of applied rules via `declarativeNetRequest.onRuleMatchedDebug`
 - Drag-and-drop reordering of rules
+- Optional per-rule **Disable PW Bot Detection** response rewrite for redirected scripts
 
 
 
@@ -30,6 +31,7 @@ The extension ships with **all assets locally**; no network/CDN required.
    - **Contain**: matches when the Source is a substring of the URL, for example `example.com/path`.
 3. Optionally choose a **Category**.
 4. Fill **Source** and **Destination** and **Save**.
+5. Optionally enable **Disable PW Bot Detection** to rewrite matching redirected script responses from `window._pwBotScore=<number>` to `window._pwBotScore=99`.
 
 ### Categories
 - **Uncategorized** always appears first and contains rules without a category.
@@ -61,6 +63,7 @@ The extension ships with **all assets locally**; no network/CDN required.
 
 ## Permissions
 - `declarativeNetRequest` and `declarativeNetRequestFeedback` (for logging)
+- `debugger` for optional response-body rewriting when **Disable PW Bot Detection** is enabled
 - `storage`
 - `host_permissions: <all_urls>` to allow redirection from any site
 
