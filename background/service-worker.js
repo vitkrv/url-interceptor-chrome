@@ -27,10 +27,17 @@ const STORAGE_KEYS = {
   LOGS: "logs",
   NEXT_DNR_ID: "nextDnrId",
   MAP: "idMap", // map our rule.id -> DNR numeric id
-  RULE_STATUSES: "ruleStatuses"
+  RULE_STATUSES: "ruleStatuses",
+  USER_AGENT_OVERRIDE: "userAgentOverride"
 };
 
 const LOG_LIMIT = 1000; // keep last N logs
+const USER_AGENT_DNR_RULE_ID = 1;
+const DEFAULT_USER_AGENT_OVERRIDE = {
+  enabled: false,
+  mode: "attach",
+  value: "Playwire/2.0"
+};
 const PW_BOT_CONTENT_SCRIPT_ID = "pw-bot-accessor";
 const PW_BOT_CONTENT_SCRIPT_FILE = "content/pw-bot-accessor.js";
 const DNR_RESOURCE_TYPES = [
@@ -60,7 +67,8 @@ async function getState() {
     [STORAGE_KEYS.LOGS]: [],
     [STORAGE_KEYS.NEXT_DNR_ID]: 1000,
     [STORAGE_KEYS.MAP]: {},
-    [STORAGE_KEYS.RULE_STATUSES]: {}
+    [STORAGE_KEYS.RULE_STATUSES]: {},
+    [STORAGE_KEYS.USER_AGENT_OVERRIDE]: DEFAULT_USER_AGENT_OVERRIDE
   });
   return data;
 }
@@ -74,6 +82,32 @@ function normalizeRuleForClient(rule) {
     ...rule,
     disablePwBotDetection: !!(rule && rule.disablePwBotDetection)
   };
+}
+
+function normalizeUserAgentOverride(config) {
+  const source = config && typeof config === "object" ? config : {};
+  const value = typeof source.value === "string" && source.value.trim()
+    ? source.value.trim()
+    : DEFAULT_USER_AGENT_OVERRIDE.value;
+  return {
+    enabled: !!source.enabled,
+    mode: source.mode === "replace" ? "replace" : "attach",
+    value
+  };
+}
+
+function getUserAgentValidationError(value) {
+  const text = String(value || "").trim();
+  if (!text) return "User Agent value is required";
+  if (!/^[\x20-\x7E]+$/.test(text)) {
+    return "User Agent value must use printable ASCII characters only";
+  }
+  return "";
+}
+
+async function appendLogAndNotify(entry) {
+  await appendLog(entry);
+  await chrome.runtime.sendMessage({ type: "logs-updated" }).catch(() => {});
 }
 
 function getEnabledPwBotOverrideRuleIds(state) {
@@ -428,6 +462,30 @@ async function toDnrRule(rule, dnrId) {
   };
 }
 
+function toUserAgentDnrRule(config) {
+  const userAgentOverride = normalizeUserAgentOverride(config);
+  const value = userAgentOverride.value.trim();
+  const validationError = getUserAgentValidationError(value);
+  if (!userAgentOverride.enabled || validationError) return null;
+
+  return {
+    id: USER_AGENT_DNR_RULE_ID,
+    priority: 2,
+    action: {
+      type: "modifyHeaders",
+      requestHeaders: [{
+        header: "user-agent",
+        operation: userAgentOverride.mode === "replace" ? "set" : "append",
+        value
+      }]
+    },
+    condition: {
+      regexFilter: "^https?://",
+      resourceTypes: DNR_RESOURCE_TYPES
+    }
+  };
+}
+
 async function rebuildDnrRules() {
   const state = await getState();
   const { RULES, GLOBAL_ENABLED, MAP } = STORAGE_KEYS;
@@ -435,51 +493,41 @@ async function rebuildDnrRules() {
   const globalEnabled = state[GLOBAL_ENABLED] !== false;
   const idMap = state[MAP] || {};
   const statuses = {};
+  const add = [];
+  const userAgentRule = toUserAgentDnrRule(state[STORAGE_KEYS.USER_AGENT_OVERRIDE]);
+  if (userAgentRule) add.push(userAgentRule);
 
-  // First, clear all dynamic rules if global disabled
   if (!globalEnabled) {
-    const existing = await chrome.declarativeNetRequest.getDynamicRules();
-    if (existing.length) {
-      const removeIds = existing.map(r => r.id);
-      await chrome.declarativeNetRequest.updateDynamicRules({ removeRuleIds: removeIds, addRules: [] });
-    }
     for (const r of rules) {
       statuses[r.id] = makeRuleStatus(true, r.enabled ? "Global disabled" : "Disabled");
     }
-    await setState({ [STORAGE_KEYS.RULE_STATUSES]: statuses });
-    await syncPwBotAccessor({
-      ...state,
-      [STORAGE_KEYS.RULE_STATUSES]: statuses
-    });
-    return;
+  } else {
+    // Build redirect rules only while global redirects are enabled.
+    for (const r of rules) {
+      if (!r.enabled) {
+        statuses[r.id] = makeRuleStatus(true, "Disabled");
+        continue;
+      }
+
+      const dnrId = idMap[r.id] || state[STORAGE_KEYS.NEXT_DNR_ID] || 1000;
+      const result = await toDnrRule(r, dnrId);
+      statuses[r.id] = result.status;
+
+      if (result.dnrRule) {
+        if (!idMap[r.id]) {
+          idMap[r.id] = dnrId;
+          state[STORAGE_KEYS.NEXT_DNR_ID] = dnrId + 1;
+        }
+        add.push(result.dnrRule);
+      } else {
+        // rule invalid; drop its mapping so ids can be reused
+        delete idMap[r.id];
+      }
+    }
   }
 
-  // Build new set
-  const add = [];
   const existing = await chrome.declarativeNetRequest.getDynamicRules();
   const removeIds = existing.map(r => r.id);
-
-  for (const r of rules) {
-    if (!r.enabled) {
-      statuses[r.id] = makeRuleStatus(true, "Disabled");
-      continue;
-    }
-
-    const dnrId = idMap[r.id] || state[STORAGE_KEYS.NEXT_DNR_ID] || 1000;
-    const result = await toDnrRule(r, dnrId);
-    statuses[r.id] = result.status;
-
-    if (result.dnrRule) {
-      if (!idMap[r.id]) {
-        idMap[r.id] = dnrId;
-        state[STORAGE_KEYS.NEXT_DNR_ID] = dnrId + 1;
-      }
-      add.push(result.dnrRule);
-    } else {
-      // rule invalid; drop its mapping so ids can be reused
-      delete idMap[r.id];
-    }
-  }
 
   // Replace existing dynamic rules entirely to avoid duplicate IDs
   await chrome.declarativeNetRequest.updateDynamicRules({
@@ -560,6 +608,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         rules: (state[STORAGE_KEYS.RULES] || []).map(normalizeRuleForClient),
         categories: normalizeCategories(state[STORAGE_KEYS.CATEGORIES]),
         globalEnabled: state[STORAGE_KEYS.GLOBAL_ENABLED] !== false,
+        userAgentOverride: normalizeUserAgentOverride(state[STORAGE_KEYS.USER_AGENT_OVERRIDE]),
         logs: state[STORAGE_KEYS.LOGS] || [],
         ruleStatuses: state[STORAGE_KEYS.RULE_STATUSES] || {}
       });
@@ -570,6 +619,78 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       await setState({ [STORAGE_KEYS.GLOBAL_ENABLED]: !!msg.enabled });
       await rebuildDnrRules();
       sendResponse({ ok: true });
+      return;
+    }
+
+    if (msg && msg.type === "set-user-agent-enabled") {
+      const state = await getState();
+      const current = normalizeUserAgentOverride(state[STORAGE_KEYS.USER_AGENT_OVERRIDE]);
+      const enabled = !!msg.enabled;
+      const validationError = enabled ? getUserAgentValidationError(current.value) : "";
+      if (validationError) {
+        sendResponse({ ok: false, error: validationError });
+        return;
+      }
+
+      if (current.enabled === enabled) {
+        sendResponse({ ok: true, userAgentOverride: current });
+        return;
+      }
+
+      const next = { ...current, enabled };
+      try {
+        await setState({ [STORAGE_KEYS.USER_AGENT_OVERRIDE]: next });
+        await rebuildDnrRules();
+      } catch (e) {
+        await setState({ [STORAGE_KEYS.USER_AGENT_OVERRIDE]: current });
+        await rebuildDnrRules().catch(() => {});
+        sendResponse({ ok: false, error: e && e.message ? e.message : String(e) });
+        return;
+      }
+      await appendLogAndNotify({
+        time: new Date().toISOString(),
+        info: `User Agent override ${enabled ? "enabled" : "disabled"}`
+      });
+      sendResponse({ ok: true, userAgentOverride: next });
+      return;
+    }
+
+    if (msg && msg.type === "save-user-agent-override") {
+      const mode = msg.mode === "replace" ? "replace" : msg.mode === "attach" ? "attach" : "";
+      const value = String(msg.value || "").trim();
+      if (!mode) {
+        sendResponse({ ok: false, error: "Unsupported User Agent override mode" });
+        return;
+      }
+      const validationError = getUserAgentValidationError(value);
+      if (validationError) {
+        sendResponse({ ok: false, error: validationError });
+        return;
+      }
+
+      const state = await getState();
+      const current = normalizeUserAgentOverride(state[STORAGE_KEYS.USER_AGENT_OVERRIDE]);
+      const next = { ...current, mode, value };
+      const changed = current.mode !== next.mode || current.value !== next.value;
+      if (!changed) {
+        sendResponse({ ok: true, userAgentOverride: next });
+        return;
+      }
+
+      try {
+        await setState({ [STORAGE_KEYS.USER_AGENT_OVERRIDE]: next });
+        await rebuildDnrRules();
+      } catch (e) {
+        await setState({ [STORAGE_KEYS.USER_AGENT_OVERRIDE]: current });
+        await rebuildDnrRules().catch(() => {});
+        sendResponse({ ok: false, error: e && e.message ? e.message : String(e) });
+        return;
+      }
+      await appendLogAndNotify({
+        time: new Date().toISOString(),
+        info: `User Agent override changed to ${mode} [${value}]`
+      });
+      sendResponse({ ok: true, userAgentOverride: next });
       return;
     }
 

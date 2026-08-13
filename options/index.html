@@ -19,11 +19,20 @@
         </div>
       </div>
       <div class="actions">
+        <div class="action-group">
+          <button id="btnCustomizeUserAgent" class="btn outlined" type="button">Customize UA</button>
+          <label class="switch" title="Enable User Agent override">
+            <input type="checkbox" id="userAgentToggle">
+            <span class="slider"></span>
+          </label>
+          <span class="toggle-label">UA</span>
+        </div>
+        <div class="header-separator"></div>
         <label class="switch">
           <input type="checkbox" id="globalToggle">
           <span class="slider"></span>
         </label>
-        <span class="toggle-label">Global</span>
+        <span class="toggle-label">Global redirects</span>
         <button id="btnExport" class="btn outlined">Export</button>
         <label class="btn outlined file-label">
           Import <input type="file" id="fileImport" accept="application/json">
@@ -152,6 +161,32 @@
           <button id="btnYes" class="btn danger">Yes</button>
         </div>
       </div>
+    </dialog>
+
+    <!-- User Agent Override Modal -->
+    <dialog id="userAgentModal" class="modal">
+      <form method="dialog" id="userAgentForm">
+        <h3>User Agent Override</h3>
+
+        <label class="field">
+          <span>Override Type</span>
+          <select id="userAgentMode" name="userAgentMode">
+            <option value="attach">Attach</option>
+            <option value="replace">Replace</option>
+          </select>
+        </label>
+
+        <label class="field">
+          <span>User Agent Value</span>
+          <input type="text" id="userAgentValue" name="userAgentValue" required placeholder="Playwire/2.0">
+          <div class="error" id="userAgentError"></div>
+        </label>
+
+        <div class="modal-actions">
+          <button id="btnCancelUserAgent" type="button" value="cancel" class="btn text">Cancel</button>
+          <button id="btnSaveUserAgent" class="btn">Save</button>
+        </div>
+      </form>
     </dialog>
 
     <!-- Logs Modal -->

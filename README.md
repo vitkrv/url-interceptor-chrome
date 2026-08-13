@@ -5,6 +5,7 @@ A Chrome extension that intercepts and redirects URLs using user-defined rules. 
 - **Exact**, **Wildcard (*)**, and **Contain** modes
 - Per-rule enable/disable
 - Global enable/disable
+- Independent User-Agent override with attach or replace modes
 - Categories with filtered rule lists and drag-and-drop assignment
 - Import/Export rules and categories as JSON
 - Live **Logs** of applied rules via `declarativeNetRequest.onRuleMatchedDebug`
@@ -47,7 +48,16 @@ The extension ships with **all assets locally**; no network/CDN required.
 - Drag and drop to reorder rules.
 
 ### Global Toggle
-- Use the switch on the top right to enable/disable **all** interception without deleting rules.
+- Use the **Global redirects** switch on the top right to enable/disable redirect rules without deleting them.
+- This switch does not control the User-Agent override.
+
+### User-Agent Override
+- Use **Customize UA** to choose an override type:
+  - **Attach** appends the configured value to the existing User-Agent.
+  - **Replace** sets the full User-Agent to the configured value.
+- The default customization is **Attach** with `Playwire/2.0`.
+- Use the UA switch beside **Customize UA** to enable or disable this feature independently from redirects.
+- User-Agent values must be non-empty printable ASCII text and cannot contain tabs, newlines, or other control characters.
 
 ### Import/Export
 - **Export** downloads `rules-export.json` with `{ categories, rules }`.
@@ -59,16 +69,19 @@ The extension ships with **all assets locally**; no network/CDN required.
   [time] on page [page_url] rule [rule_name] applied
   ```
 - Only active rules generate logs.
+- User-Agent override enable, disable, and configuration changes are logged once per change.
 - Click **Clear** to wipe logs.
 
 ## Permissions
 - `declarativeNetRequest` and `declarativeNetRequestFeedback` (for logging)
+- `declarativeNetRequest` is also used to modify the User-Agent request header when the override is enabled
 - `scripting` for the optional page-variable override when **Disable PW Bot Detection** is enabled
 - `storage`
 - `host_permissions: <all_urls>` to allow redirection from any site
 
 ## Technical Notes
 - Interception uses **dynamic DNR rules** via `updateDynamicRules`.
+- The User-Agent override uses a reserved dynamic DNR rule ID separate from redirect rule IDs.
 - **Exact** → `regexFilter: ^...$` (escaped)
 - **Contain** → `urlFilter`
 - **Wildcard** → `regexFilter` with `*` translated to `.*`

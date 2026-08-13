@@ -13,6 +13,14 @@ const els = {
   logsBody: document.getElementById('logsBody'),
   btnCloseLogs: document.getElementById('btnCloseLogs'),
   btnClearLogs: document.getElementById('btnClearLogs'),
+  btnCustomizeUserAgent: document.getElementById('btnCustomizeUserAgent'),
+  userAgentToggle: document.getElementById('userAgentToggle'),
+  userAgentModal: document.getElementById('userAgentModal'),
+  userAgentForm: document.getElementById('userAgentForm'),
+  userAgentMode: document.getElementById('userAgentMode'),
+  userAgentValue: document.getElementById('userAgentValue'),
+  userAgentError: document.getElementById('userAgentError'),
+  btnCancelUserAgent: document.getElementById('btnCancelUserAgent'),
   globalToggle: document.getElementById('globalToggle'),
   ruleModal: document.getElementById('ruleModal'),
   ruleForm: document.getElementById('ruleForm'),
@@ -52,6 +60,11 @@ let categories = [];
 let logs = [];
 let ruleStatuses = {};
 let globalEnabled = true;
+let userAgentOverride = {
+  enabled: false,
+  mode: 'attach',
+  value: 'Playwire/2.0'
+};
 let currentRuleEnabled = true;
 let selectedCategoryId = UNCATEGORIZED_ID;
 let pendingConfirm = null;
@@ -69,6 +82,10 @@ function clearCategoryErrors() {
   els.categoryNameError.textContent = '';
 }
 
+function clearUserAgentErrors() {
+  els.userAgentError.textContent = '';
+}
+
 ['name', 'source', 'destination'].forEach((id) => {
   els[id].addEventListener('input', () => {
     els[id + 'Error'].textContent = '';
@@ -76,6 +93,8 @@ function clearCategoryErrors() {
 });
 
 els.categoryName.addEventListener('input', clearCategoryErrors);
+els.userAgentValue.addEventListener('input', clearUserAgentErrors);
+els.userAgentMode.addEventListener('change', clearUserAgentErrors);
 
 els.mode.addEventListener('change', () => {
   els.sourceError.textContent = '';
@@ -111,6 +130,27 @@ function getSourceValidationError(source, mode) {
   }
 
   return 'Unsupported rule mode';
+}
+
+function normalizeUserAgentOverride(config) {
+  const source = config && typeof config === 'object' ? config : {};
+  const value = typeof source.value === 'string' && source.value.trim()
+    ? source.value.trim()
+    : 'Playwire/2.0';
+  return {
+    enabled: !!source.enabled,
+    mode: source.mode === 'replace' ? 'replace' : 'attach',
+    value
+  };
+}
+
+function getUserAgentValidationError(value) {
+  const text = String(value || '').trim();
+  if (!text) return 'User Agent value is required';
+  if (!/^[\x20-\x7E]+$/.test(text)) {
+    return 'User Agent value must use printable ASCII characters only';
+  }
+  return '';
 }
 
 function updateSourcePlaceholder() {
@@ -161,10 +201,12 @@ async function refresh() {
   logs = (state.logs || []).slice(-1000);
   ruleStatuses = state.ruleStatuses || {};
   globalEnabled = !!state.globalEnabled;
+  userAgentOverride = normalizeUserAgentOverride(state.userAgentOverride);
   if (selectedCategoryId && !getCategoryById(selectedCategoryId)) {
     selectedCategoryId = UNCATEGORIZED_ID;
   }
   els.globalToggle.checked = globalEnabled;
+  els.userAgentToggle.checked = userAgentOverride.enabled;
   renderCategoryOptions();
   renderCategories();
   renderRules();
@@ -504,6 +546,13 @@ function openCategoryModal(category = null) {
   els.categoryModal.showModal();
 }
 
+function openUserAgentModal() {
+  clearUserAgentErrors();
+  els.userAgentMode.value = userAgentOverride.mode;
+  els.userAgentValue.value = userAgentOverride.value;
+  els.userAgentModal.showModal();
+}
+
 function openConfirm(text, onYes) {
   pendingConfirm = onYes;
   els.confirmText.textContent = text;
@@ -661,9 +710,51 @@ els.btnCancelCategory.addEventListener('click', (e) => {
   els.categoryModal.close();
 });
 
+els.btnCancelUserAgent.addEventListener('click', (e) => {
+  e.preventDefault();
+  els.userAgentModal.close();
+});
+
 // New
 els.btnNew.addEventListener('click', () => openRuleModal(null));
 els.btnNewCategory.addEventListener('click', () => openCategoryModal(null));
+els.btnCustomizeUserAgent.addEventListener('click', () => openUserAgentModal());
+
+els.userAgentForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  clearUserAgentErrors();
+  const mode = els.userAgentMode.value;
+  const value = els.userAgentValue.value.trim();
+  const validationError = getUserAgentValidationError(value);
+  if (validationError) {
+    els.userAgentError.textContent = validationError;
+    return;
+  }
+
+  const resp = await sendMessage({
+    type: 'save-user-agent-override',
+    mode,
+    value
+  });
+  if (!resp || !resp.ok) {
+    els.userAgentError.textContent = resp && resp.error || 'Failed to save User Agent override';
+    return;
+  }
+
+  await refresh();
+  els.userAgentModal.close();
+});
+
+els.userAgentToggle.addEventListener('change', async () => {
+  const resp = await sendMessage({
+    type: 'set-user-agent-enabled',
+    enabled: els.userAgentToggle.checked
+  });
+  if (!resp || !resp.ok) {
+    alert('Failed to update User Agent override: ' + (resp && resp.error || 'unknown'));
+  }
+  await refresh();
+});
 
 // Global toggle
 els.globalToggle.addEventListener('change', async () => {
