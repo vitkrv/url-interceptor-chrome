@@ -1211,6 +1211,10 @@ function renderLogs() {
 
 // Live log updates
 chrome.runtime.onMessage.addListener((msg) => {
+  if (msg && msg.type === 'global-state-updated') {
+    refresh();
+    return;
+  }
   if (msg && msg.type === 'logs-updated') {
     if (!els.logsModal.open || logsPaused) return;
     refresh().then(renderLogs);

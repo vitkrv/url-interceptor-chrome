@@ -4,14 +4,23 @@
   <head>
     <meta charset="utf-8">
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; object-src 'none'">
-    <title>URL Interceptor</title>
+    <title>Requests Interceptor</title>
     <link rel="stylesheet" href="popup.css">
   </head>
   <body>
     <div class="wrap">
-      <h3>URL Interceptor</h3>
-      <p class="tip">Use the Options page to manage rules.</p>
-      <button class="btn" id="openOptions" type="button">Open Admin</button>
+      <h3>Requests Interceptor</h3>
+      <label class="switch-row">
+        <span>Global rules</span>
+        <span class="switch">
+          <input type="checkbox" id="globalToggle">
+          <span class="slider"></span>
+        </span>
+      </label>
+      <button class="btn" id="openOptions" type="button">Open Admin Panel</button>
+      <hr>
+      <div class="section-title">Active on this page</div>
+      <ul id="appliedRules" class="rules"></ul>
     </div>
     <script src="popup.js"></script>
   </body>

@@ -56,8 +56,102 @@ const DNR_RESOURCE_TYPES = [
   "other"
 ];
 
+const RULE_ACTIVITY_SESSION_KEY = "ruleActivity";
+const ACTION_ICON = {
+  active: {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  inactive: {
+    "16": "icons/icon16-gray.png",
+    "32": "icons/icon32-gray.png",
+    "48": "icons/icon48-gray.png",
+    "128": "icons/icon128-gray.png"
+  }
+};
 let logWriteQueue = Promise.resolve();
+let ruleActivityQueue = Promise.resolve();
 const activePwBotFrames = new Map();
+const tabRuleActivityFallback = {};
+
+async function getRuleActivity() {
+  if (!chrome.storage.session) return tabRuleActivityFallback;
+  const data = await chrome.storage.session.get({ [RULE_ACTIVITY_SESSION_KEY]: {} });
+  return data[RULE_ACTIVITY_SESSION_KEY] || {};
+}
+
+async function setRuleActivity(activity) {
+  if (!chrome.storage.session) {
+    Object.keys(tabRuleActivityFallback).forEach(key => delete tabRuleActivityFallback[key]);
+    Object.assign(tabRuleActivityFallback, activity);
+    return;
+  }
+  await chrome.storage.session.set({ [RULE_ACTIVITY_SESSION_KEY]: activity });
+}
+
+async function updateRuleActivity(mutator) {
+  ruleActivityQueue = ruleActivityQueue.catch(() => {}).then(async () => {
+    const activity = await getRuleActivity();
+    const result = mutator(activity);
+    await setRuleActivity(activity);
+    return result;
+  });
+  return ruleActivityQueue;
+}
+
+async function getAppliedRuleNames(tabId) {
+  const activity = await getRuleActivity();
+  const rulesById = activity[String(tabId)] || {};
+  return Object.values(rulesById);
+}
+
+async function updateActionState(tabId, globalEnabled = null) {
+  if (typeof tabId !== "number" || tabId < 0) return;
+  const enabled = globalEnabled === null
+    ? (await getState())[STORAGE_KEYS.GLOBAL_ENABLED] !== false
+    : globalEnabled;
+  const count = (await getAppliedRuleNames(tabId)).length;
+  const active = enabled && count > 0;
+  await chrome.action.setIcon({ tabId, path: active ? ACTION_ICON.active : ACTION_ICON.inactive }).catch(() => {});
+  await chrome.action.setBadgeBackgroundColor({ tabId, color: "#d93025" }).catch(() => {});
+  await chrome.action.setBadgeText({ tabId, text: active ? String(count) : "" }).catch(() => {});
+}
+
+async function updateAllActionStates(globalEnabled = null) {
+  const enabled = globalEnabled === null
+    ? (await getState())[STORAGE_KEYS.GLOBAL_ENABLED] !== false
+    : globalEnabled;
+  const tabs = await chrome.tabs.query({}).catch(() => []);
+  await Promise.all(tabs
+    .filter(tab => typeof tab.id === "number")
+    .map(tab => updateActionState(tab.id, enabled)));
+}
+
+async function resetTabRuleActivity(tabId) {
+  if (typeof tabId !== "number" || tabId < 0) return;
+  await updateRuleActivity(activity => {
+    delete activity[String(tabId)];
+  });
+  await updateActionState(tabId);
+  await chrome.runtime.sendMessage({ type: "rule-activity-updated", tabId }).catch(() => {});
+}
+
+async function rememberAppliedRule(tabId, rule) {
+  if (typeof tabId !== "number" || tabId < 0 || !rule || !rule.id) return;
+  const changed = await updateRuleActivity(activity => {
+    const key = String(tabId);
+    const rulesById = activity[key] || {};
+    if (Object.prototype.hasOwnProperty.call(rulesById, rule.id)) return false;
+    rulesById[rule.id] = rule.name || "Unnamed rule";
+    activity[key] = rulesById;
+    return true;
+  });
+  if (!changed) return;
+  await updateActionState(tabId);
+  await chrome.runtime.sendMessage({ type: "rule-activity-updated", tabId }).catch(() => {});
+}
 
 async function getState() {
   const data = await chrome.storage.local.get({
@@ -606,6 +700,8 @@ chrome.declarativeNetRequest.onRuleMatchedDebug.addListener(async (info) => {
 
     // Find our rule by DNR id
     const matchedId = info.rule.ruleId;
+    if (matchedId === USER_AGENT_DNR_RULE_ID) return;
+
     let matchedRule = null;
     for (const [rid, dnrId] of Object.entries(idMap)) {
       if (dnrId === matchedId) {
@@ -614,6 +710,8 @@ chrome.declarativeNetRequest.onRuleMatchedDebug.addListener(async (info) => {
       }
     }
     if (!matchedRule || !matchedRule.enabled) return;
+
+    await rememberAppliedRule(info.request && info.request.tabId, matchedRule);
 
     if (matchedRule.disablePwBotDetection) {
       const tabId = info.request && info.request.tabId;
@@ -639,12 +737,31 @@ chrome.declarativeNetRequest.onRuleMatchedDebug.addListener(async (info) => {
 
 chrome.tabs.onRemoved.addListener((tabId) => {
   activePwBotFrames.delete(tabId);
+  resetTabRuleActivity(tabId);
+});
+
+chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+  if (changeInfo.status === "loading") {
+    resetTabRuleActivity(tabId);
+  }
 });
 
 // Messages from options UI
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   (async () => {
     try {
+      if (msg && msg.type === "get-popup-state") {
+        const state = await getState();
+        const tabId = typeof msg.tabId === "number" ? msg.tabId : sender.tab && sender.tab.id;
+        const globalEnabled = state[STORAGE_KEYS.GLOBAL_ENABLED] !== false;
+        await updateActionState(tabId, globalEnabled);
+        sendResponse({
+          globalEnabled,
+          appliedRules: await getAppliedRuleNames(tabId)
+        });
+        return;
+      }
+
       if (msg && msg.type === "get-state") {
       let state = await getState();
       const rules = state[STORAGE_KEYS.RULES] || [];
@@ -665,8 +782,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     }
 
     if (msg && msg.type === "set-global") {
-      await setState({ [STORAGE_KEYS.GLOBAL_ENABLED]: !!msg.enabled });
+      const enabled = !!msg.enabled;
+      await setState({ [STORAGE_KEYS.GLOBAL_ENABLED]: enabled });
       await rebuildDnrRules();
+      await updateAllActionStates(enabled);
+      await chrome.runtime.sendMessage({ type: "global-state-updated" }).catch(() => {});
       sendResponse({ ok: true });
       return;
     }
@@ -1028,6 +1148,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   return true; // keep channel open for async sendResponse
 });
 
+async function initializeExtension() {
+  await rebuildDnrRules();
+  await updateAllActionStates();
+}
+
 // On install / startup ensure rules are rebuilt
-chrome.runtime.onInstalled.addListener(() => rebuildDnrRules());
-chrome.runtime.onStartup.addListener(() => rebuildDnrRules());
+chrome.runtime.onInstalled.addListener(() => initializeExtension());
+chrome.runtime.onStartup.addListener(() => initializeExtension());
+updateAllActionStates().catch(() => {});
