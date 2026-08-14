@@ -233,11 +233,26 @@
     <!-- Logs Modal -->
     <dialog id="logsModal" class="modal modal-lg">
       <div class="logs-header">
-        <h3>Logs</h3>
-        <div class="spacer"></div>
-        <button id="btnClearLogs" class="btn outlined">Clear</button>
-        <button id="btnCloseLogs" class="btn text">Close</button>
+        <div>
+          <h3>Logs</h3>
+          <div id="logsCount" class="small">No logs</div>
+        </div>
+        <div class="logs-tools">
+          <input id="logsSearch" class="logs-search" type="search" placeholder="Search logs">
+          <select id="logsTypeFilter" class="logs-type-filter" aria-label="Filter logs by type">
+            <option value="all">All events</option>
+            <option value="redirect">Redirects</option>
+            <option value="user-agent">User-Agent</option>
+            <option value="pw-bot">PW Bot</option>
+            <option value="event">Events</option>
+          </select>
+          <button id="btnToggleLogsPause" class="btn outlined" type="button">Pause</button>
+          <button id="btnCopyLogs" class="btn outlined" type="button">Copy visible</button>
+          <button id="btnClearLogs" class="btn outlined" type="button">Clear</button>
+          <button id="btnCloseLogs" class="btn text" type="button">Close</button>
+        </div>
       </div>
+      <div id="logsStatus" class="small logs-status" aria-live="polite"></div>
       <div id="logsBody" class="logs"></div>
     </dialog>
 

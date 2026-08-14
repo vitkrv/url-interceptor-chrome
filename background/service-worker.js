@@ -234,6 +234,19 @@ function redactUrlForLog(rawUrl) {
   }
 }
 
+async function getWebpageUrlForLog(request) {
+  if (!request) return "";
+  if (request.type === "main_frame" && request.url) return redactUrlForLog(request.url);
+  if (request.documentUrl) return redactUrlForLog(request.documentUrl);
+
+  if (typeof request.tabId === "number" && request.tabId >= 0) {
+    const tab = await chrome.tabs.get(request.tabId).catch(() => null);
+    if (tab && tab.url) return redactUrlForLog(tab.url);
+  }
+
+  return request.initiator ? redactUrlForLog(request.initiator) : "";
+}
+
 async function appendLog(entry) {
   logWriteQueue = logWriteQueue.catch(() => {}).then(async () => {
     const state = await getState();
@@ -609,9 +622,13 @@ chrome.declarativeNetRequest.onRuleMatchedDebug.addListener(async (info) => {
     }
 
     const ts = new Date().toISOString();
-    const pageUrl = redactUrlForLog(info.request.url);
+    const requestUrl = redactUrlForLog(info.request.url);
+    const webpageUrl = await getWebpageUrlForLog(info.request);
+    const logTarget = webpageUrl
+      ? `on webpage [${webpageUrl}] URL [${requestUrl}]`
+      : `on URL [${requestUrl}]`;
 
-    await appendLog({ time: ts, info: `on page [${pageUrl}] rule [${matchedRule.name}] applied` });
+    await appendLog({ time: ts, info: `${logTarget} rule [${matchedRule.name}] applied` });
     // notify UI
     await chrome.runtime.sendMessage({ type: "logs-updated" }).catch(() => {});
   } catch (e) {

@@ -73,10 +73,14 @@ The extension ships with **all assets locally**; no network/CDN required.
 ### Logs
 - Click **Logs** to see entries in the format:
   ```
-  [time] on page [page_url] rule [rule_name] applied
+  [time] on webpage [webpage_url] URL [matched_url] rule [rule_name] applied
   ```
+- If Chrome cannot provide the containing webpage, logs fall back to the matched URL only.
 - Only active rules generate logs.
 - User-Agent override enable, disable, and configuration changes are logged once per change.
+- Use search and event type filters to narrow the visible log list.
+- Use **Pause** to freeze the modal view without stopping log collection; **Continue** refreshes it again.
+- Use **Copy visible** to copy the currently filtered logs as plain text.
 - Click **Clear** to wipe logs.
 
 ## Permissions

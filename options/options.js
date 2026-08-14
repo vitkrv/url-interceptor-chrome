@@ -12,7 +12,13 @@ const els = {
   btnLogs: document.getElementById('btnLogs'),
   logsModal: document.getElementById('logsModal'),
   logsBody: document.getElementById('logsBody'),
+  logsCount: document.getElementById('logsCount'),
+  logsSearch: document.getElementById('logsSearch'),
+  logsTypeFilter: document.getElementById('logsTypeFilter'),
+  logsStatus: document.getElementById('logsStatus'),
   btnCloseLogs: document.getElementById('btnCloseLogs'),
+  btnToggleLogsPause: document.getElementById('btnToggleLogsPause'),
+  btnCopyLogs: document.getElementById('btnCopyLogs'),
   btnClearLogs: document.getElementById('btnClearLogs'),
   btnCustomizeUserAgent: document.getElementById('btnCustomizeUserAgent'),
   userAgentToggle: document.getElementById('userAgentToggle'),
@@ -69,6 +75,7 @@ const els = {
 let rules = [];
 let categories = [];
 let logs = [];
+let logsPaused = false;
 let ruleStatuses = {};
 let globalEnabled = true;
 let userAgentOverride = {
@@ -975,42 +982,229 @@ els.fileImport.addEventListener('change', async (ev) => {
 // Logs
 els.btnLogs.addEventListener('click', async () => {
   await refresh();
+  setLogsPaused(false);
+  els.logsStatus.textContent = '';
   renderLogs();
   els.logsModal.showModal();
 });
 els.btnCloseLogs.addEventListener('click', () => els.logsModal.close());
-els.btnClearLogs.addEventListener('click', async () => {
-  await sendMessage({ type: 'clear-logs' });
+els.logsSearch.addEventListener('input', renderLogs);
+els.logsTypeFilter.addEventListener('change', renderLogs);
+els.btnToggleLogsPause.addEventListener('click', async () => {
+  setLogsPaused(!logsPaused);
+  if (logsPaused) {
+    els.logsStatus.textContent = 'Log refresh paused. New logs are still recorded.';
+    return;
+  }
   await refresh();
+  els.logsStatus.textContent = 'Log refresh resumed.';
   renderLogs();
 });
+els.btnCopyLogs.addEventListener('click', async () => {
+  const visibleLogs = getVisibleLogs();
+  if (!visibleLogs.length) {
+    els.logsStatus.textContent = 'No visible logs to copy.';
+    return;
+  }
+  const text = visibleLogs
+    .map(log => `[${log.timeText}] ${log.typeLabel}: ${log.title}${log.detail ? ` - ${log.detail}` : ''}`)
+    .join('\n');
+  try {
+    await navigator.clipboard.writeText(text);
+    els.logsStatus.textContent = `Copied ${visibleLogs.length} visible log${visibleLogs.length === 1 ? '' : 's'}.`;
+  } catch {
+    els.logsStatus.textContent = 'Copy failed. Select and copy logs manually.';
+  }
+});
+els.btnClearLogs.addEventListener('click', () => {
+  openConfirm('Clear all logs?', async () => {
+    await sendMessage({ type: 'clear-logs' });
+    await refresh();
+    els.logsStatus.textContent = 'Logs cleared.';
+    renderLogs();
+  });
+});
+
+function setLogsPaused(paused) {
+  logsPaused = paused;
+  els.btnToggleLogsPause.textContent = paused ? 'Continue' : 'Pause';
+  els.btnToggleLogsPause.setAttribute('aria-pressed', String(paused));
+}
+
+function formatLogTime(time) {
+  if (!time) return 'Unknown time';
+  const date = new Date(time);
+  return Number.isNaN(date.getTime()) ? String(time) : date.toLocaleString();
+}
+
+function parseLogInfo(info) {
+  const text = String(info || '');
+  let match = text.match(/^on webpage \[(.*)] URL \[(.*)] rule \[(.*)] applied$/);
+  if (match) {
+    return {
+      type: 'redirect',
+      typeLabel: 'Redirect',
+      title: `Rule "${match[3]}" applied`,
+      detail: `Webpage: ${match[1]}\nURL: ${match[2]}`,
+      ruleName: match[3],
+      webpageUrl: match[1],
+      url: match[2],
+      rawInfo: text
+    };
+  }
+
+  match = text.match(/^on URL \[(.*)] rule \[(.*)] applied$/);
+  if (match) {
+    return {
+      type: 'redirect',
+      typeLabel: 'Redirect',
+      title: `Rule "${match[2]}" applied`,
+      detail: `URL: ${match[1]}`,
+      ruleName: match[2],
+      url: match[1],
+      rawInfo: text
+    };
+  }
+
+  match = text.match(/^on page \[(.*)] rule \[(.*)] applied$/);
+  if (match) {
+    return {
+      type: 'redirect',
+      typeLabel: 'Redirect',
+      title: `Rule "${match[2]}" applied`,
+      detail: `URL: ${match[1]}`,
+      ruleName: match[2],
+      url: match[1],
+      rawInfo: text
+    };
+  }
+
+  match = text.match(/^PW Bot Detection override activated for rule \[(.*)]$/);
+  if (match) {
+    return {
+      type: 'pw-bot',
+      typeLabel: 'PW Bot',
+      title: 'Detection override activated',
+      detail: `Rule "${match[1]}"`,
+      ruleName: match[1],
+      rawInfo: text
+    };
+  }
+
+  match = text.match(/^User Agent override (enabled|disabled)$/);
+  if (match) {
+    return {
+      type: 'user-agent',
+      typeLabel: 'User-Agent',
+      title: `Override ${match[1]}`,
+      detail: '',
+      rawInfo: text
+    };
+  }
+
+  match = text.match(/^User Agent override changed to (attach|replace) \[(.*)]$/);
+  if (match) {
+    return {
+      type: 'user-agent',
+      typeLabel: 'User-Agent',
+      title: `Override changed to ${match[1]}`,
+      detail: match[2],
+      rawInfo: text
+    };
+  }
+
+  return {
+    type: 'event',
+    typeLabel: 'Event',
+    title: text || 'Log entry',
+    detail: '',
+    rawInfo: text
+  };
+}
+
+function normalizeLogEntry(entry) {
+  let time = '';
+  let info = '';
+  if (typeof entry === 'string') {
+    const match = entry.match(/^\[(.*?)\]\s*(.*)$/);
+    time = match ? match[1] : '';
+    info = match ? match[2] : entry;
+  } else if (entry && typeof entry === 'object') {
+    time = entry.time;
+    info = entry.info;
+  }
+
+  const parsed = parseLogInfo(info);
+  const timeText = formatLogTime(time);
+  const searchText = [
+    timeText,
+    parsed.typeLabel,
+    parsed.title,
+    parsed.detail,
+    parsed.ruleName,
+    parsed.webpageUrl,
+    parsed.url,
+    parsed.rawInfo
+  ].join(' ').toLowerCase();
+  return { ...parsed, timeText, searchText };
+}
+
+function getVisibleLogs() {
+  const query = els.logsSearch.value.trim().toLowerCase();
+  const type = els.logsTypeFilter.value;
+  return logs
+    .slice(-1000)
+    .reverse()
+    .map(normalizeLogEntry)
+    .filter(log => (type === 'all' || log.type === type) && (!query || log.searchText.includes(query)));
+}
 
 function renderLogs() {
   els.logsBody.innerHTML = '';
+  const total = logs ? logs.length : 0;
+  const visibleLogs = getVisibleLogs();
+  els.logsCount.textContent = total
+    ? `Showing ${visibleLogs.length} of ${total} log${total === 1 ? '' : 's'}`
+    : 'No logs';
+
   if (!logs || !logs.length) {
-    els.logsBody.textContent = 'No logs yet.';
+    const empty = document.createElement('div');
+    empty.className = 'logs-empty';
+    empty.textContent = 'No logs yet.';
+    els.logsBody.appendChild(empty);
     return;
   }
-  for (const entry of logs.slice(-1000).reverse()) {
-    let time = '', info = '';
-    if (typeof entry === 'string') {
-      const m = entry.match(/^\[(.*?)\]\s*(.*)$/);
-      time = m ? m[1] : '';
-      info = m ? m[2] : entry;
-    } else {
-      time = entry.time;
-      info = entry.info;
-    }
+  if (!visibleLogs.length) {
+    const empty = document.createElement('div');
+    empty.className = 'logs-empty';
+    empty.textContent = 'No logs match the current filters.';
+    els.logsBody.appendChild(empty);
+    return;
+  }
+  for (const entry of visibleLogs) {
     const row = document.createElement('div');
-    row.className = 'log-row';
+    row.className = `log-row log-${entry.type}`;
     const t = document.createElement('div');
     t.className = 'log-time';
-    t.textContent = new Date(time).toLocaleString();
-    const i = document.createElement('div');
-    i.className = 'log-info';
-    i.textContent = info;
+    t.textContent = entry.timeText;
+    const badge = document.createElement('span');
+    badge.className = `log-type ${entry.type}`;
+    badge.textContent = entry.typeLabel;
+    const content = document.createElement('div');
+    content.className = 'log-content';
+    const title = document.createElement('div');
+    title.className = 'log-title';
+    title.textContent = entry.title;
+    content.appendChild(title);
+    if (entry.detail) {
+      const detail = document.createElement('div');
+      detail.className = 'log-detail';
+      detail.textContent = entry.detail;
+      content.appendChild(detail);
+    }
     row.appendChild(t);
-    row.appendChild(i);
+    row.appendChild(badge);
+    row.appendChild(content);
     els.logsBody.appendChild(row);
   }
 }
@@ -1018,6 +1212,7 @@ function renderLogs() {
 // Live log updates
 chrome.runtime.onMessage.addListener((msg) => {
   if (msg && msg.type === 'logs-updated') {
+    if (!els.logsModal.open || logsPaused) return;
     refresh().then(renderLogs);
   }
 });
