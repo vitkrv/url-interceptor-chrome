@@ -33,10 +33,6 @@
           <span class="slider"></span>
         </label>
         <span class="toggle-label">Global redirects</span>
-        <button id="btnExport" class="btn outlined">Export</button>
-        <label class="btn outlined file-label">
-          Import <input type="file" id="fileImport" accept="application/json">
-        </label>
         <button id="btnLogs" class="btn">Logs</button>
       </div>
     </header>
@@ -54,6 +50,13 @@
           <button id="btnNewCategory" class="btn outlined compact" type="button">Add</button>
         </div>
         <div id="categoriesList" class="categories-list"></div>
+        <div class="sidebar-separator"></div>
+        <div class="full-actions">
+          <label class="btn outlined file-label">
+            Full import <input type="file" id="fileImport" accept="application/json">
+          </label>
+          <button id="btnExport" class="btn outlined" type="button">Full export</button>
+        </div>
       </section>
 
       <section class="rules card">

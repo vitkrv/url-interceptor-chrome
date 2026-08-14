@@ -348,6 +348,7 @@ function getRuleStatus(rule) {
 function statusBadge(rule) {
   const status = getRuleStatus(rule);
   if (status.message === 'Disabled') return createBadge(status.message, 'gray');
+  if (status.message === 'Global disabled') return createBadge(status.message, 'gray');
   const className = status.ok ? 'ok' : 'error';
   return createBadge(status.message, className);
 }
@@ -593,8 +594,20 @@ function renderRules() {
     btnShare.addEventListener('click', () => openQuickShareModal(r));
 
     const btnDelete = document.createElement('button');
-    btnDelete.className = 'btn danger';
-    btnDelete.textContent = 'Delete';
+    btnDelete.className = 'btn danger icon-btn delete-rule';
+    btnDelete.type = 'button';
+    btnDelete.title = 'Delete';
+    btnDelete.setAttribute('aria-label', 'Delete');
+    btnDelete.innerHTML = `
+      <svg viewBox="0 0 512 512" aria-hidden="true" focusable="false">
+        <g fill="currentColor">
+          <path d="M88.594,464.731C90.958,491.486,113.368,512,140.234,512h231.523c26.858,0,49.276-20.514,51.641-47.269l25.642-335.928H62.952L88.594,464.731z M420.847,154.93l-23.474,307.496c-1.182,13.37-12.195,23.448-25.616,23.448H140.234c-13.42,0-24.434-10.078-25.591-23.132L91.145,154.93H420.847z"/>
+          <path d="M182.954,435.339c5.877-0.349,10.35-5.4,9.992-11.269l-10.137-202.234c-0.358-5.876-5.401-10.349-11.278-9.992c-5.877,0.357-10.35,5.409-9.993,11.277l10.137,202.234C172.033,431.231,177.085,435.696,182.954,435.339z"/>
+          <path d="M256,435.364c5.885,0,10.656-4.763,10.656-10.648V222.474c0-5.885-4.771-10.648-10.656-10.648c-5.885,0-10.657,4.763-10.657,10.648v202.242C245.344,430.601,250.115,435.364,256,435.364z"/>
+          <path d="M329.046,435.339c5.878,0.357,10.921-4.108,11.278-9.984l10.129-202.234c0.348-5.868-4.116-10.92-9.993-11.277c-5.877-0.357-10.92,4.116-11.277,9.992L319.054,424.07C318.697,429.938,323.17,434.99,329.046,435.339z"/>
+          <path d="M439.115,64.517c0,0-34.078-5.664-43.34-8.479c-8.301-2.526-80.795-13.566-80.795-13.566l-2.722-19.297C310.388,9.857,299.484,0,286.642,0h-61.302c-12.825,0-23.728,9.857-25.616,23.175l-2.721,19.297c0,0-72.469,11.039-80.778,13.566c-9.261,2.815-43.357,8.479-43.357,8.479C62.544,67.365,55.332,77.172,55.332,88.38v21.926h401.336V88.38C456.668,77.172,449.456,67.365,439.115,64.517z M276.318,38.824h-40.636c-3.606,0-6.532-2.925-6.532-6.532s2.926-6.532,6.532-6.532h40.636c3.606,0,6.532,2.925,6.532,6.532S279.924,38.824,276.318,38.824z"/>
+        </g>
+      </svg>`;
     btnDelete.addEventListener('click', () => confirmDeleteRule(r));
 
     actions.appendChild(toggle);
