@@ -98,9 +98,13 @@ body{
 .modal-lg{ width:min(980px, 96vw); }
 .modal::backdrop{ background: rgba(0,0,0,.6); }
 .modal .field{display:flex; flex-direction:column; margin:8px 0}
-.modal .field input, .modal .field select{
+.modal .field input, .modal .field select, .modal .field textarea{
   background:#10141c; color:var(--c-text); border:1px solid rgba(255,255,255,.12);
   border-radius:10px; padding:10px 12px; outline:none;
+}
+.modal .field textarea{
+  resize:vertical;
+  min-height:94px;
 }
 .modal .switch-field{
   flex-direction:row;
@@ -208,10 +212,32 @@ body{
 .badge.cyan{ background:#08242a; color:#7ee7f3; }
 .badge.gray{ background:#1c1f26; color:#bbc6d4; }
 .badge.purple{ background:#241633; color:#d8b4fe; }
+.badge.green{ background:#0c2a1a; color:#8be6a8; }
 .badge.ok{ background:#0c2a1a; color:#8be6a8; }
 .badge.error{ background:#331116; color:#ff9aa8; }
 
 #btnNew{ font-size:42px; padding:30px 42px }
+#btnQuickImport{
+  width:100%;
+  font-size:24px;
+  padding:12px 18px;
+  background:linear-gradient(135deg, #2a02f2, #f7006b);
+  color:#fff;
+  text-shadow:0 1px 2px rgba(0,0,0,.45);
+  white-space:nowrap;
+}
+.item .btn.icon-btn{
+  width:42px;
+  height:42px;
+  padding:0;
+  border-radius:12px;
+  font-size:18px;
+}
+.quick-string{
+  width:100%;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;
+  overflow-wrap:anywhere;
+}
 #logsModal{ min-height:360px }
 .logs{ max-height: 60vh; overflow:auto; background:#0f131a; border:1px solid rgba(255,255,255,.08); border-radius:12px; padding:10px; display:flex; flex-direction:column; gap:4px }
 .log-row{ display:grid; grid-template-columns:140px 1fr; gap:8px; padding:4px 0; border-bottom:1px solid rgba(255,255,255,0.06) }

@@ -47,6 +47,8 @@
           <button id="btnNew" class="btn">Create Rule</button>
         </div>
         <div class="sidebar-separator"></div>
+        <button id="btnQuickImport" class="btn quick-import" type="button">Quick import</button>
+        <div class="sidebar-separator"></div>
         <div class="categories-header">
           <h2>Categories</h2>
           <button id="btnNewCategory" class="btn outlined compact" type="button">Add</button>
@@ -77,6 +79,7 @@
             <option value="exact">Exact match</option>
             <option value="wildcard">Wildcard (*)</option>
             <option value="contain">Contain</option>
+            <option value="domain">Domain redirect</option>
           </select>
         </label>
 
@@ -110,6 +113,7 @@
         <div class="hint small">
           • In Wildcard mode use * to match any characters.<br/>
           • Contain mode uses substring matching.<br/>
+          • Domain mode redirects a host and its subdomains while preserving path and query.<br/>
           • Exact mode matches the whole URL.
         </div>
 
@@ -118,6 +122,40 @@
           <button id="btnSaveRule" class="btn">Save</button>
         </div>
         <input type="hidden" id="ruleId" name="ruleId">
+      </form>
+    </dialog>
+
+    <!-- Quick Share Modal -->
+    <dialog id="quickShareModal" class="modal">
+      <div class="confirm-content">
+        <h3>Quick Share</h3>
+        <div class="hint small">Paste this string into Quick import on another device to review and add the rule.</div>
+        <label class="field">
+          <span>Rule string</span>
+          <textarea id="quickShareValue" class="quick-string" readonly rows="4"></textarea>
+        </label>
+        <div id="quickShareStatus" class="small"></div>
+        <div class="modal-actions">
+          <button id="btnCloseQuickShare" type="button" class="btn text">Close</button>
+          <button id="btnCopyQuickShare" type="button" class="btn">Copy</button>
+        </div>
+      </div>
+    </dialog>
+
+    <!-- Quick Import Modal -->
+    <dialog id="quickImportModal" class="modal">
+      <form method="dialog" id="quickImportForm">
+        <h3>Quick Import</h3>
+        <div class="hint small">Paste a ur1. string copied from another rule's Share button to review and add that rule on this device.</div>
+        <label class="field">
+          <span>Rule string</span>
+          <textarea id="quickImportValue" class="quick-string" rows="5" required></textarea>
+          <div class="error" id="quickImportError"></div>
+        </label>
+        <div class="modal-actions">
+          <button id="btnCancelQuickImport" type="button" class="btn text">Cancel</button>
+          <button id="btnParseQuickImport" class="btn">Continue</button>
+        </div>
       </form>
     </dialog>
 

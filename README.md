@@ -2,12 +2,13 @@
 # URL Interceptor & Redirector (MV3)
 
 A Chrome extension that intercepts and redirects URLs using user-defined rules. Supports:
-- **Exact**, **Wildcard (*)**, and **Contain** modes
+- **Exact**, **Wildcard (*)**, **Contain**, and **Domain redirect** modes
 - Per-rule enable/disable
 - Global enable/disable
 - Independent User-Agent override with attach or replace modes
 - Categories with filtered rule lists and drag-and-drop assignment
 - Import/Export rules and categories as JSON
+- Quick share/import of a single rule via a compact text string
 - Live **Logs** of applied rules via `declarativeNetRequest.onRuleMatchedDebug`
 - Drag-and-drop reordering of rules
 - Optional per-rule **Disable PW Bot Detection** page-variable override for redirected scripts
@@ -30,6 +31,7 @@ The extension ships with **all assets locally**; no network/CDN required.
    - **Exact**: matches exactly the given full `http` or `https` URL.
    - **Wildcard**: use `*` to match any characters in the Source URL. Wildcard sources must start with `http://` or `https://`, for example `https://*.example.com/*`.
    - **Contain**: matches when the Source is a substring of the URL, for example `example.com/path`.
+   - **Domain redirect**: enter bare domains only. Requests to the source domain and its subdomains redirect to the destination domain while keeping the original path and query, for example `cdn.intergient.com/file.js` -> `cdn.intergientdev.com/file.js`.
 3. Optionally choose a **Category**.
 4. Fill **Source** and **Destination** and **Save**.
 5. Optionally enable **Disable PW Bot Detection** to make page reads of `window._pwBotScore` return `99` after the rule redirects a request.
@@ -47,6 +49,11 @@ The extension ships with **all assets locally**; no network/CDN required.
 - Toggle a rule with the switch on each row.
 - Drag and drop to reorder rules.
 
+### Quick Share
+- Use the **Share** icon on a rule to copy a compact `ur1.` string containing its mode, name, source, destination, and PW Bot Detection setting.
+- Use **Quick import** under **Create Rule** to paste a `ur1.` string. Valid strings open the Create Rule modal pre-filled for review.
+- Quick-imported rules are created as Uncategorized and enabled by default.
+
 ### Global Toggle
 - Use the **Global redirects** switch on the top right to enable/disable redirect rules without deleting them.
 - This switch does not control the User-Agent override.
@@ -61,7 +68,7 @@ The extension ships with **all assets locally**; no network/CDN required.
 
 ### Import/Export
 - **Export** downloads `rules-export.json` with `{ categories, rules }`.
-- **Import** accepts the exported object format, or the legacy array of rules with fields: `name`, `mode`, `source`, `destination`, `enabled`. Imported rules and categories get new IDs.
+- **Import** accepts the exported object format, or the legacy array of rules with fields: `name`, `mode`, `source`, `destination`, `enabled`. Imported rules and categories get new IDs. Domain rules use `"mode": "domain"` with bare source and destination domains.
 
 ### Logs
 - Click **Logs** to see entries in the format:
@@ -85,6 +92,7 @@ The extension ships with **all assets locally**; no network/CDN required.
 - **Exact** → `regexFilter: ^...$` (escaped)
 - **Contain** → `urlFilter`
 - **Wildcard** → `regexFilter` with `*` translated to `.*`
+- **Domain redirect** → `urlFilter: ||source-domain/` with `redirect.transform.host`
 - We keep a stable mapping of your rule IDs to DNR numeric IDs.
 - Log buffer capped at 1000 entries. Logged request URLs are stored without query strings or fragments.
 

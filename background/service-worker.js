@@ -9,7 +9,7 @@
  * {
  *   id: string,        // uuid-like
  *   name: string,      // <= 80 chars
- *   mode: "exact" | "wildcard" | "contain",
+ *   mode: "exact" | "wildcard" | "contain" | "domain",
  *   source: string,
  *   destination: string,
  *   enabled: boolean,
@@ -164,6 +164,14 @@ function isValidHttpUrl(str) {
   }
 }
 
+function isValidDomain(str) {
+  const value = String(str || "").trim().toLowerCase();
+  if (!value || value.length > 253 || /[:/?#@\s]/.test(value)) return false;
+  return value
+    .split(".")
+    .every(label => /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(label));
+}
+
 function getSourceValidationError(source, mode) {
   const value = String(source || '').trim();
   if (!value) return "Source is required";
@@ -189,7 +197,20 @@ function getSourceValidationError(source, mode) {
     return "";
   }
 
+  if (mode === "domain") {
+    return isValidDomain(value) ? "" : "Domain source must be a bare domain, for example cdn.intergient.com";
+  }
+
   return "Unsupported rule mode";
+}
+
+function getDestinationValidationError(destination, mode) {
+  const value = String(destination || "").trim();
+  if (!value) return "Destination is required";
+  if (mode === "domain") {
+    return isValidDomain(value) ? "" : "Domain destination must be a bare domain, for example cdn.intergientdev.com";
+  }
+  return isValidHttpUrl(value) ? "" : "Destination must be a valid URL";
 }
 
 function makeRuleStatus(ok, message) {
@@ -402,6 +423,10 @@ async function toDnrRule(rule, dnrId) {
   if (sourceError) {
     return { dnrRule: null, status: makeRuleStatus(false, sourceError) };
   }
+  const destinationError = getDestinationValidationError(rule.destination, rule.mode);
+  if (destinationError) {
+    return { dnrRule: null, status: makeRuleStatus(false, destinationError) };
+  }
 
   const action = {
     type: "redirect",
@@ -447,6 +472,13 @@ async function toDnrRule(rule, dnrId) {
     }
     condition.regexFilter = expr;
     action.redirect = { url: rule.destination };
+  } else if (rule.mode === "domain") {
+    condition.urlFilter = `||${String(rule.source).trim().toLowerCase()}/`;
+    action.redirect = {
+      transform: {
+        host: String(rule.destination).trim().toLowerCase()
+      }
+    };
   } else {
     return { dnrRule: null, status: makeRuleStatus(false, "Unsupported rule mode") };
   }
@@ -708,14 +740,15 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         sendResponse({ ok: false, error: "Name exceeds 80 characters" });
         return;
       }
-      if (!["exact", "wildcard", "contain"].includes(r.mode)) r.mode = "exact";
+      if (!["exact", "wildcard", "contain", "domain"].includes(r.mode)) r.mode = "exact";
       const sourceError = getSourceValidationError(r.source, r.mode);
       if (sourceError) {
         sendResponse({ ok: false, error: sourceError });
         return;
       }
-      if (!isValidHttpUrl(r.destination)) {
-        sendResponse({ ok: false, error: "Destination must be a valid URL" });
+      const destinationError = getDestinationValidationError(r.destination, r.mode);
+      if (destinationError) {
+        sendResponse({ ok: false, error: destinationError });
         return;
       }
       if (typeof r.enabled !== "boolean") r.enabled = true;
@@ -934,10 +967,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           skipped += 1;
           continue;
         }
-        const mode = ["exact", "wildcard", "contain"].includes(r.mode) ? r.mode : "exact";
+        const mode = ["exact", "wildcard", "contain", "domain"].includes(r.mode) ? r.mode : "exact";
         const source = String(r.source).trim();
         const destination = String(r.destination).trim();
-        if (getSourceValidationError(source, mode) || !isValidHttpUrl(destination)) {
+        if (getSourceValidationError(source, mode) || getDestinationValidationError(destination, mode)) {
           skipped += 1;
           continue;
         }

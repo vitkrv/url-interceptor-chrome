@@ -5,6 +5,7 @@ const els = {
   rulesList: document.getElementById('rulesList'),
   categoriesList: document.getElementById('categoriesList'),
   btnNew: document.getElementById('btnNew'),
+  btnQuickImport: document.getElementById('btnQuickImport'),
   btnNewCategory: document.getElementById('btnNewCategory'),
   btnExport: document.getElementById('btnExport'),
   fileImport: document.getElementById('fileImport'),
@@ -36,6 +37,16 @@ const els = {
   destinationError: document.getElementById('destinationError'),
   ruleId: document.getElementById('ruleId'),
   btnCancelRule: document.getElementById('btnCancelRule'),
+  quickShareModal: document.getElementById('quickShareModal'),
+  quickShareValue: document.getElementById('quickShareValue'),
+  quickShareStatus: document.getElementById('quickShareStatus'),
+  btnCloseQuickShare: document.getElementById('btnCloseQuickShare'),
+  btnCopyQuickShare: document.getElementById('btnCopyQuickShare'),
+  quickImportModal: document.getElementById('quickImportModal'),
+  quickImportForm: document.getElementById('quickImportForm'),
+  quickImportValue: document.getElementById('quickImportValue'),
+  quickImportError: document.getElementById('quickImportError'),
+  btnCancelQuickImport: document.getElementById('btnCancelQuickImport'),
   categoryModal: document.getElementById('categoryModal'),
   categoryForm: document.getElementById('categoryForm'),
   categoryModalTitle: document.getElementById('categoryModalTitle'),
@@ -95,6 +106,9 @@ function clearUserAgentErrors() {
 els.categoryName.addEventListener('input', clearCategoryErrors);
 els.userAgentValue.addEventListener('input', clearUserAgentErrors);
 els.userAgentMode.addEventListener('change', clearUserAgentErrors);
+els.quickImportValue.addEventListener('input', () => {
+  els.quickImportError.textContent = '';
+});
 
 els.mode.addEventListener('change', () => {
   els.sourceError.textContent = '';
@@ -108,6 +122,14 @@ function isValidHttpUrl(str) {
   } catch {
     return false;
   }
+}
+
+function isValidDomain(str) {
+  const value = String(str || '').trim().toLowerCase();
+  if (!value || value.length > 253 || /[:/?#@\s]/.test(value)) return false;
+  return value
+    .split('.')
+    .every(label => /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(label));
 }
 
 function getSourceValidationError(source, mode) {
@@ -129,7 +151,94 @@ function getSourceValidationError(source, mode) {
     return '';
   }
 
+  if (mode === 'domain') {
+    return isValidDomain(value) ? '' : 'Domain source must be a bare domain, for example cdn.intergient.com';
+  }
+
   return 'Unsupported rule mode';
+}
+
+function getDestinationValidationError(destination, mode) {
+  const value = String(destination || '').trim();
+  if (!value) return 'Destination is required';
+  if (mode === 'domain') {
+    return isValidDomain(value) ? '' : 'Domain destination must be a bare domain, for example cdn.intergientdev.com';
+  }
+  return isValidHttpUrl(value) ? '' : 'Destination must be a valid http(s) URL';
+}
+
+const QUICK_SHARE_PREFIX = 'ur1.';
+const QUICK_SHARE_MODE_CODES = {
+  exact: 'e',
+  wildcard: 'w',
+  contain: 'c',
+  domain: 'd'
+};
+const QUICK_SHARE_MODES = Object.fromEntries(
+  Object.entries(QUICK_SHARE_MODE_CODES).map(([mode, code]) => [code, mode])
+);
+
+function toBase64Url(text) {
+  const bytes = new TextEncoder().encode(text);
+  let binary = '';
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+function fromBase64Url(text) {
+  const base64 = text.replace(/-/g, '+').replace(/_/g, '/').padEnd(Math.ceil(text.length / 4) * 4, '=');
+  const binary = atob(base64);
+  return new TextDecoder().decode(Uint8Array.from(binary, ch => ch.charCodeAt(0)));
+}
+
+function encodeQuickShareRule(rule) {
+  const data = [
+    QUICK_SHARE_MODE_CODES[rule.mode] || QUICK_SHARE_MODE_CODES.exact,
+    rule.name,
+    rule.source,
+    rule.destination
+  ];
+  if (rule.disablePwBotDetection) data.push(1);
+  return QUICK_SHARE_PREFIX + toBase64Url(JSON.stringify(data));
+}
+
+function decodeQuickShareRule(text) {
+  const value = String(text || '').trim();
+  if (!value.startsWith(QUICK_SHARE_PREFIX)) throw new Error('Quick share string must start with ur1.');
+
+  let data;
+  try {
+    data = JSON.parse(fromBase64Url(value.slice(QUICK_SHARE_PREFIX.length)));
+  } catch {
+    throw new Error('Quick share string is invalid.');
+  }
+
+  if (!Array.isArray(data) || data.length < 4 || data.length > 5) {
+    throw new Error('Quick share string has an unsupported format.');
+  }
+  if (data.slice(0, 4).some(part => typeof part !== 'string') || (data.length === 5 && data[4] !== 1)) {
+    throw new Error('Quick share string has an unsupported format.');
+  }
+
+  const mode = QUICK_SHARE_MODES[data[0]];
+  const rule = {
+    name: String(data[1] || '').trim(),
+    mode,
+    source: String(data[2] || '').trim(),
+    destination: String(data[3] || '').trim(),
+    disablePwBotDetection: data[4] === 1,
+    enabled: true,
+    categoryId: null
+  };
+
+  if (!mode) throw new Error('Quick share rule mode is unsupported.');
+  if (!rule.name) throw new Error('Name is required.');
+  if (rule.name.length > 80) throw new Error('Name exceeds 80 characters.');
+  const sourceError = getSourceValidationError(rule.source, rule.mode);
+  if (sourceError) throw new Error(sourceError);
+  const destinationError = getDestinationValidationError(rule.destination, rule.mode);
+  if (destinationError) throw new Error(destinationError);
+  return rule;
 }
 
 function normalizeUserAgentOverride(config) {
@@ -158,9 +267,14 @@ function updateSourcePlaceholder() {
     els.source.placeholder = 'e.g., https://*.example.com/*';
   } else if (els.mode.value === 'contain') {
     els.source.placeholder = 'e.g., example.com/path';
+  } else if (els.mode.value === 'domain') {
+    els.source.placeholder = 'e.g., cdn.intergient.com';
   } else {
     els.source.placeholder = 'e.g., https://example.com/a';
   }
+  els.destination.placeholder = els.mode.value === 'domain'
+    ? 'e.g., cdn.intergientdev.com'
+    : 'e.g., https://target.com/b';
 }
 
 function sendMessage(payload) {
@@ -220,6 +334,7 @@ function createBadge(text, className = '') {
 }
 
 function ruleBadge(mode) {
+  if (mode === 'domain') return createBadge('Domain', 'green');
   if (mode === 'wildcard') return createBadge('Wildcard', 'cyan');
   if (mode === 'contain') return createBadge('Contain', 'orange');
   return createBadge('Exact', 'purple');
@@ -469,12 +584,21 @@ function renderRules() {
     btnDup.textContent = 'Duplicate';
     btnDup.addEventListener('click', () => openRuleModal(r, true));
 
+    const btnShare = document.createElement('button');
+    btnShare.className = 'btn outlined icon-btn share-rule';
+    btnShare.type = 'button';
+    btnShare.title = 'Share';
+    btnShare.setAttribute('aria-label', 'Share');
+    btnShare.innerHTML = '&#x2934;';
+    btnShare.addEventListener('click', () => openQuickShareModal(r));
+
     const btnDelete = document.createElement('button');
     btnDelete.className = 'btn danger';
     btnDelete.textContent = 'Delete';
     btnDelete.addEventListener('click', () => confirmDeleteRule(r));
 
     actions.appendChild(toggle);
+    actions.appendChild(btnShare);
     actions.appendChild(btnEdit);
     actions.appendChild(btnDup);
     actions.appendChild(btnDelete);
@@ -551,6 +675,21 @@ function openUserAgentModal() {
   els.userAgentMode.value = userAgentOverride.mode;
   els.userAgentValue.value = userAgentOverride.value;
   els.userAgentModal.showModal();
+}
+
+function openQuickShareModal(rule) {
+  els.quickShareValue.value = encodeQuickShareRule(rule);
+  els.quickShareStatus.textContent = '';
+  els.quickShareModal.showModal();
+  els.quickShareValue.focus();
+  els.quickShareValue.select();
+}
+
+function openQuickImportModal() {
+  els.quickImportValue.value = '';
+  els.quickImportError.textContent = '';
+  els.quickImportModal.showModal();
+  els.quickImportValue.focus();
 }
 
 function openConfirm(text, onYes) {
@@ -635,8 +774,8 @@ els.ruleForm.addEventListener('submit', async (e) => {
   if (rule.name && rule.name.length > 80) errors.name = 'Name exceeds 80 characters';
   const sourceError = getSourceValidationError(rule.source, rule.mode);
   if (sourceError) errors.source = sourceError;
-  if (!rule.destination) errors.destination = 'Destination is required';
-  if (rule.destination && !isValidHttpUrl(rule.destination)) errors.destination = 'Destination must be a valid http(s) URL';
+  const destinationError = getDestinationValidationError(rule.destination, rule.mode);
+  if (destinationError) errors.destination = destinationError;
   if (Object.keys(errors).length) {
     if (errors.name) els.nameError.textContent = errors.name;
     if (errors.source) els.sourceError.textContent = errors.source;
@@ -650,7 +789,7 @@ els.ruleForm.addEventListener('submit', async (e) => {
         els.nameError.textContent = resp.error;
       } else if (/source|wildcard|contain/i.test(resp.error)) {
         els.sourceError.textContent = resp.error;
-      } else if (resp.error === 'Destination must be a valid URL') {
+      } else if (/destination/i.test(resp.error)) {
         els.destinationError.textContent = resp.error;
       } else {
         alert('Failed to save rule: ' + resp.error);
@@ -717,8 +856,37 @@ els.btnCancelUserAgent.addEventListener('click', (e) => {
 
 // New
 els.btnNew.addEventListener('click', () => openRuleModal(null));
+els.btnQuickImport.addEventListener('click', openQuickImportModal);
 els.btnNewCategory.addEventListener('click', () => openCategoryModal(null));
 els.btnCustomizeUserAgent.addEventListener('click', () => openUserAgentModal());
+
+els.btnCloseQuickShare.addEventListener('click', () => els.quickShareModal.close());
+els.btnCopyQuickShare.addEventListener('click', async () => {
+  els.quickShareValue.select();
+  try {
+    await navigator.clipboard.writeText(els.quickShareValue.value);
+    els.quickShareStatus.textContent = 'Copied.';
+  } catch {
+    els.quickShareStatus.textContent = 'Copy failed. Select and copy the string manually.';
+  }
+});
+
+els.btnCancelQuickImport.addEventListener('click', (e) => {
+  e.preventDefault();
+  els.quickImportModal.close();
+});
+
+els.quickImportForm.addEventListener('submit', (e) => {
+  e.preventDefault();
+  els.quickImportError.textContent = '';
+  try {
+    const rule = decodeQuickShareRule(els.quickImportValue.value);
+    els.quickImportModal.close();
+    openRuleModal(rule, true);
+  } catch (err) {
+    els.quickImportError.textContent = err && err.message ? err.message : 'Invalid quick share string.';
+  }
+});
 
 els.userAgentForm.addEventListener('submit', async (e) => {
   e.preventDefault();
