@@ -5,13 +5,14 @@ A Chrome extension that intercepts and redirects URLs using user-defined rules. 
 - **Exact**, **Wildcard (*)**, **Contain**, and **Domain redirect** modes
 - Per-rule enable/disable
 - Global enable/disable
+- Independent **Disable PW Bot Detection** override
 - Independent User-Agent override with attach or replace modes
 - Categories with filtered rule lists and drag-and-drop assignment
 - Import/Export rules and categories as JSON
 - Quick share/import of a single rule via a compact text string
 - Live **Logs** of applied rules via `declarativeNetRequest.onRuleMatchedDebug`
 - Drag-and-drop reordering of rules
-- Optional per-rule **Disable PW Bot Detection** page-variable override for redirected scripts
+- Optional **Disable PW Bot Detection** page-variable override
 
 
 
@@ -34,7 +35,6 @@ The extension ships with **all assets locally**; no network/CDN required.
    - **Domain redirect**: enter bare domains only. Requests to the source domain and its subdomains redirect to the destination domain while keeping the original path and query, for example `cdn.intergient.com/file.js` -> `cdn.intergientdev.com/file.js`.
 3. Optionally choose a **Category**.
 4. Fill **Source** and **Destination** and **Save**.
-5. Optionally enable **Disable PW Bot Detection** to make page reads of `window._pwBotScore` return `99` after the rule redirects a request.
 
 ### Categories
 - **Uncategorized** always appears first and contains rules without a category.
@@ -58,6 +58,10 @@ The extension ships with **all assets locally**; no network/CDN required.
 - Use the **Global redirects** switch on the top right to enable/disable redirect rules without deleting them.
 - This switch does not control the User-Agent override.
 
+### PW Bot Detection Override
+- Use **Disable PW Bot Detection** in the top bar to make page reads of `window._pwBotScore` return `99`.
+- This switch is independent from Global redirects and User-Agent override.
+
 ### User-Agent Override
 - Use **Customize UA** to choose an override type:
   - **Attach** appends the configured value to the existing User-Agent.
@@ -69,6 +73,7 @@ The extension ships with **all assets locally**; no network/CDN required.
 ### Import/Export
 - **Export** downloads `rules-export.json` with `{ categories, rules }`.
 - **Import** accepts the exported object format, or the legacy array of rules with fields: `name`, `mode`, `source`, `destination`, `enabled`. Imported rules and categories get new IDs. Domain rules use `"mode": "domain"` with bare source and destination domains.
+- Legacy imports may include `disablePwBotDetection`; the field is accepted and ignored.
 
 ### Logs
 - Click **Logs** to see entries in the format:

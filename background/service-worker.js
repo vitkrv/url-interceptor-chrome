@@ -13,7 +13,6 @@
  *   source: string,
  *   destination: string,
  *   enabled: boolean,
- *   disablePwBotDetection: boolean,
  *   categoryId: string | null // optional; missing/null means Uncategorized
  * }
  *
@@ -28,6 +27,7 @@ const STORAGE_KEYS = {
   NEXT_DNR_ID: "nextDnrId",
   MAP: "idMap", // map our rule.id -> DNR numeric id
   RULE_STATUSES: "ruleStatuses",
+  PW_BOT_DETECTION_ENABLED: "pwBotDetectionEnabled",
   USER_AGENT_OVERRIDE: "userAgentOverride"
 };
 
@@ -162,6 +162,7 @@ async function getState() {
     [STORAGE_KEYS.NEXT_DNR_ID]: 1000,
     [STORAGE_KEYS.MAP]: {},
     [STORAGE_KEYS.RULE_STATUSES]: {},
+    [STORAGE_KEYS.PW_BOT_DETECTION_ENABLED]: false,
     [STORAGE_KEYS.USER_AGENT_OVERRIDE]: DEFAULT_USER_AGENT_OVERRIDE
   });
   return data;
@@ -172,10 +173,8 @@ async function setState(patch) {
 }
 
 function normalizeRuleForClient(rule) {
-  return {
-    ...rule,
-    disablePwBotDetection: !!(rule && rule.disablePwBotDetection)
-  };
+  const { disablePwBotDetection, ...normalized } = rule || {};
+  return normalized;
 }
 
 function normalizeUserAgentOverride(config) {
@@ -202,17 +201,6 @@ function getUserAgentValidationError(value) {
 async function appendLogAndNotify(entry) {
   await appendLog(entry);
   await chrome.runtime.sendMessage({ type: "logs-updated" }).catch(() => {});
-}
-
-function getEnabledPwBotOverrideRuleIds(state) {
-  const globalEnabled = state[STORAGE_KEYS.GLOBAL_ENABLED] !== false;
-  if (!globalEnabled) return new Set();
-  const rules = state[STORAGE_KEYS.RULES] || [];
-  return new Set(
-    rules
-      .filter(rule => !!rule.enabled && !!rule.disablePwBotDetection)
-      .map(rule => rule.id)
-  );
 }
 
 function normalizeCategoryName(name) {
@@ -460,6 +448,13 @@ async function activatePwBotOverride(tabId, frameId, rule) {
   await chrome.runtime.sendMessage({ type: "logs-updated" }).catch(() => {});
 }
 
+async function setPwBotOverrideForAllTabs(active) {
+  const tabs = await chrome.tabs.query({}).catch(() => []);
+  await Promise.all(tabs
+    .filter(tab => typeof tab.id === "number")
+    .map(tab => setPwBotOverrideForTarget(tab.id, active)));
+}
+
 async function deactivateStalePwBotOverrides(activeRuleIds) {
   if (activeRuleIds.size === 0) {
     const tabs = await chrome.tabs.query({}).catch(() => []);
@@ -513,15 +508,16 @@ async function unregisterPwBotAccessor() {
 
 async function syncPwBotAccessor(state = null) {
   const currentState = state || await getState();
-  const activeRuleIds = getEnabledPwBotOverrideRuleIds(currentState);
+  const enabled = !!currentState[STORAGE_KEYS.PW_BOT_DETECTION_ENABLED];
 
-  if (activeRuleIds.size > 0) {
+  if (enabled) {
     await registerPwBotAccessor();
+    await setPwBotOverrideForAllTabs(true);
   } else {
     await unregisterPwBotAccessor();
+    await setPwBotOverrideForAllTabs(false);
+    activePwBotFrames.clear();
   }
-
-  await deactivateStalePwBotOverrides(activeRuleIds);
 }
 
 // Build a DNR rule and an install status.
@@ -713,12 +709,6 @@ chrome.declarativeNetRequest.onRuleMatchedDebug.addListener(async (info) => {
 
     await rememberAppliedRule(info.request && info.request.tabId, matchedRule);
 
-    if (matchedRule.disablePwBotDetection) {
-      const tabId = info.request && info.request.tabId;
-      const frameId = info.request && info.request.frameId;
-      await activatePwBotOverride(tabId, frameId, matchedRule);
-    }
-
     const ts = new Date().toISOString();
     const requestUrl = redactUrlForLog(info.request.url);
     const webpageUrl = await getWebpageUrlForLog(info.request);
@@ -774,6 +764,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         rules: (state[STORAGE_KEYS.RULES] || []).map(normalizeRuleForClient),
         categories: normalizeCategories(state[STORAGE_KEYS.CATEGORIES]),
         globalEnabled: state[STORAGE_KEYS.GLOBAL_ENABLED] !== false,
+        pwBotDetectionEnabled: !!state[STORAGE_KEYS.PW_BOT_DETECTION_ENABLED],
         userAgentOverride: normalizeUserAgentOverride(state[STORAGE_KEYS.USER_AGENT_OVERRIDE]),
         logs: state[STORAGE_KEYS.LOGS] || [],
         ruleStatuses: state[STORAGE_KEYS.RULE_STATUSES] || {}
@@ -788,6 +779,18 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       await updateAllActionStates(enabled);
       await chrome.runtime.sendMessage({ type: "global-state-updated" }).catch(() => {});
       sendResponse({ ok: true });
+      return;
+    }
+
+    if (msg && msg.type === "set-pw-bot-detection-enabled") {
+      const enabled = !!msg.enabled;
+      await setState({ [STORAGE_KEYS.PW_BOT_DETECTION_ENABLED]: enabled });
+      await syncPwBotAccessor({ [STORAGE_KEYS.PW_BOT_DETECTION_ENABLED]: enabled });
+      await appendLogAndNotify({
+        time: new Date().toISOString(),
+        info: `PW Bot Detection override ${enabled ? "enabled" : "disabled"}`
+      });
+      sendResponse({ ok: true, pwBotDetectionEnabled: enabled });
       return;
     }
 
@@ -889,7 +892,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         return;
       }
       if (typeof r.enabled !== "boolean") r.enabled = true;
-      r.disablePwBotDetection = !!r.disablePwBotDetection;
+      delete r.disablePwBotDetection;
       r.categoryId = getCategoryId(r.categoryId, categories);
 
       const rules = current.slice();
@@ -1118,7 +1121,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           destination,
           mode,
           enabled: typeof r.enabled === "boolean" ? r.enabled : true,
-          disablePwBotDetection: !!r.disablePwBotDetection,
           categoryId: categoryMap.get(r.categoryId) || null
         });
       }

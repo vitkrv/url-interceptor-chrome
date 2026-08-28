@@ -20,6 +20,7 @@ const els = {
   btnToggleLogsPause: document.getElementById('btnToggleLogsPause'),
   btnCopyLogs: document.getElementById('btnCopyLogs'),
   btnClearLogs: document.getElementById('btnClearLogs'),
+  pwBotDetectionToggle: document.getElementById('pwBotDetectionToggle'),
   btnCustomizeUserAgent: document.getElementById('btnCustomizeUserAgent'),
   userAgentToggle: document.getElementById('userAgentToggle'),
   userAgentModal: document.getElementById('userAgentModal'),
@@ -37,7 +38,6 @@ const els = {
   category: document.getElementById('category'),
   source: document.getElementById('source'),
   destination: document.getElementById('destination'),
-  disablePwBotDetection: document.getElementById('disablePwBotDetection'),
   nameError: document.getElementById('nameError'),
   sourceError: document.getElementById('sourceError'),
   destinationError: document.getElementById('destinationError'),
@@ -78,6 +78,7 @@ let logs = [];
 let logsPaused = false;
 let ruleStatuses = {};
 let globalEnabled = true;
+let pwBotDetectionEnabled = false;
 let userAgentOverride = {
   enabled: false,
   mode: 'attach',
@@ -205,7 +206,6 @@ function encodeQuickShareRule(rule) {
     rule.source,
     rule.destination
   ];
-  if (rule.disablePwBotDetection) data.push(1);
   return QUICK_SHARE_PREFIX + toBase64Url(JSON.stringify(data));
 }
 
@@ -233,7 +233,6 @@ function decodeQuickShareRule(text) {
     mode,
     source: String(data[2] || '').trim(),
     destination: String(data[3] || '').trim(),
-    disablePwBotDetection: data[4] === 1,
     enabled: true,
     categoryId: null
   };
@@ -322,11 +321,13 @@ async function refresh() {
   logs = (state.logs || []).slice(-1000);
   ruleStatuses = state.ruleStatuses || {};
   globalEnabled = !!state.globalEnabled;
+  pwBotDetectionEnabled = !!state.pwBotDetectionEnabled;
   userAgentOverride = normalizeUserAgentOverride(state.userAgentOverride);
   if (selectedCategoryId && !getCategoryById(selectedCategoryId)) {
     selectedCategoryId = UNCATEGORIZED_ID;
   }
   els.globalToggle.checked = globalEnabled;
+  els.pwBotDetectionToggle.checked = pwBotDetectionEnabled;
   els.userAgentToggle.checked = userAgentOverride.enabled;
   renderCategoryOptions();
   renderCategories();
@@ -557,9 +558,6 @@ function renderRules() {
     meta.className = 'meta';
     meta.appendChild(ruleBadge(r.mode));
     meta.appendChild(statusBadge(r));
-    if (r.disablePwBotDetection) {
-      meta.appendChild(createBadge('Bot Detection disabled', 'orange'));
-    }
     info.appendChild(name);
     info.appendChild(meta);
     left.appendChild(info);
@@ -655,7 +653,6 @@ function openRuleModal(existing, duplicate = false) {
     els.mode.value = existing.mode;
     els.source.value = existing.source;
     els.destination.value = existing.destination;
-    els.disablePwBotDetection.checked = !!existing.disablePwBotDetection;
     els.ruleId.value = duplicate ? '' : existing.id;
     currentRuleEnabled = existing.enabled;
     renderCategoryOptions(getRuleCategoryId(existing));
@@ -665,7 +662,6 @@ function openRuleModal(existing, duplicate = false) {
     els.mode.value = 'exact';
     els.source.value = '';
     els.destination.value = '';
-    els.disablePwBotDetection.checked = false;
     els.ruleId.value = '';
     currentRuleEnabled = true;
     renderCategoryOptions(selectedCategoryId);
@@ -786,7 +782,6 @@ els.ruleForm.addEventListener('submit', async (e) => {
     categoryId: els.category.value || null,
     source: els.source.value.trim(),
     destination: els.destination.value.trim(),
-    disablePwBotDetection: els.disablePwBotDetection.checked,
     enabled: currentRuleEnabled
   };
   const errors = {};
@@ -940,6 +935,17 @@ els.userAgentToggle.addEventListener('change', async () => {
   });
   if (!resp || !resp.ok) {
     alert('Failed to update User Agent override: ' + (resp && resp.error || 'unknown'));
+  }
+  await refresh();
+});
+
+els.pwBotDetectionToggle.addEventListener('change', async () => {
+  const resp = await sendMessage({
+    type: 'set-pw-bot-detection-enabled',
+    enabled: els.pwBotDetectionToggle.checked
+  });
+  if (!resp || !resp.ok) {
+    alert('Failed to update PW Bot Detection override: ' + (resp && resp.error || 'unknown'));
   }
   await refresh();
 });

@@ -19,6 +19,12 @@
         </div>
       </div>
       <div class="actions">
+        <label class="switch" title="Disable PW Bot Detection">
+          <input type="checkbox" id="pwBotDetectionToggle">
+          <span class="slider"></span>
+        </label>
+        <span class="toggle-label">Disable PW Bot Detection</span>
+        <div class="header-separator"></div>
         <div class="action-group">
           <button id="btnCustomizeUserAgent" class="btn outlined" type="button">Customize UA</button>
           <label class="switch" title="Enable User Agent override">
@@ -103,14 +109,6 @@
           <span>Destination URL</span>
           <input type="text" id="destination" name="destination" required placeholder="e.g., https://target.com/b">
           <div class="error" id="destinationError"></div>
-        </label>
-
-        <label class="field switch-field">
-          <span>Disable PW Bot Detection</span>
-          <label class="switch">
-            <input type="checkbox" id="disablePwBotDetection" name="disablePwBotDetection">
-            <span class="slider"></span>
-          </label>
         </label>
 
         <div class="hint small">
