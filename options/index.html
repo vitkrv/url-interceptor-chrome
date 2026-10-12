@@ -19,6 +19,14 @@
         </div>
       </div>
       <div class="actions">
+        <div class="action-group" title="Removes website CSP headers on all HTTP(S) pages, allowing local HTTP URLs and removing other header CSP restrictions. Reload webpages after changing. HTML meta CSP and other browser restrictions still apply.">
+          <label class="switch">
+            <input type="checkbox" id="cspBypassToggle" aria-label="Bypass CSP headers">
+            <span class="slider"></span>
+          </label>
+          <label class="toggle-label" for="cspBypassToggle">Bypass CSP headers</label>
+        </div>
+        <div class="header-separator"></div>
         <label class="switch" title="Disable PW Bot Detection">
           <input type="checkbox" id="pwBotDetectionToggle">
           <span class="slider"></span>

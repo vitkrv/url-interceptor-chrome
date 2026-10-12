@@ -28,11 +28,13 @@ const STORAGE_KEYS = {
   MAP: "idMap", // map our rule.id -> DNR numeric id
   RULE_STATUSES: "ruleStatuses",
   PW_BOT_DETECTION_ENABLED: "pwBotDetectionEnabled",
-  USER_AGENT_OVERRIDE: "userAgentOverride"
+  USER_AGENT_OVERRIDE: "userAgentOverride",
+  CSP_BYPASS_ENABLED: "cspBypassEnabled"
 };
 
 const LOG_LIMIT = 1000; // keep last N logs
 const USER_AGENT_DNR_RULE_ID = 1;
+const CSP_BYPASS_DNR_RULE_ID = 2;
 const DEFAULT_USER_AGENT_OVERRIDE = {
   enabled: false,
   mode: "attach",
@@ -163,7 +165,8 @@ async function getState() {
     [STORAGE_KEYS.MAP]: {},
     [STORAGE_KEYS.RULE_STATUSES]: {},
     [STORAGE_KEYS.PW_BOT_DETECTION_ENABLED]: false,
-    [STORAGE_KEYS.USER_AGENT_OVERRIDE]: DEFAULT_USER_AGENT_OVERRIDE
+    [STORAGE_KEYS.USER_AGENT_OVERRIDE]: DEFAULT_USER_AGENT_OVERRIDE,
+    [STORAGE_KEYS.CSP_BYPASS_ENABLED]: false
   });
   return data;
 }
@@ -621,6 +624,22 @@ function toUserAgentDnrRule(config) {
   };
 }
 
+function toCspBypassDnrRule(enabled) {
+  if (!enabled) return null;
+  return {
+    id: CSP_BYPASS_DNR_RULE_ID,
+    priority: 2,
+    action: {
+      type: "modifyHeaders",
+      responseHeaders: [{ header: "content-security-policy", operation: "remove" }]
+    },
+    condition: {
+      regexFilter: "^https?://",
+      resourceTypes: ["main_frame", "sub_frame", "script"]
+    }
+  };
+}
+
 async function rebuildDnrRules() {
   const state = await getState();
   const { RULES, GLOBAL_ENABLED, MAP } = STORAGE_KEYS;
@@ -631,6 +650,8 @@ async function rebuildDnrRules() {
   const add = [];
   const userAgentRule = toUserAgentDnrRule(state[STORAGE_KEYS.USER_AGENT_OVERRIDE]);
   if (userAgentRule) add.push(userAgentRule);
+  const cspBypassRule = toCspBypassDnrRule(state[STORAGE_KEYS.CSP_BYPASS_ENABLED]);
+  if (cspBypassRule) add.push(cspBypassRule);
 
   if (!globalEnabled) {
     for (const r of rules) {
@@ -696,7 +717,7 @@ chrome.declarativeNetRequest.onRuleMatchedDebug.addListener(async (info) => {
 
     // Find our rule by DNR id
     const matchedId = info.rule.ruleId;
-    if (matchedId === USER_AGENT_DNR_RULE_ID) return;
+    if (matchedId === USER_AGENT_DNR_RULE_ID || matchedId === CSP_BYPASS_DNR_RULE_ID) return;
 
     let matchedRule = null;
     for (const [rid, dnrId] of Object.entries(idMap)) {
@@ -765,6 +786,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         categories: normalizeCategories(state[STORAGE_KEYS.CATEGORIES]),
         globalEnabled: state[STORAGE_KEYS.GLOBAL_ENABLED] !== false,
         pwBotDetectionEnabled: !!state[STORAGE_KEYS.PW_BOT_DETECTION_ENABLED],
+        cspBypassEnabled: !!state[STORAGE_KEYS.CSP_BYPASS_ENABLED],
         userAgentOverride: normalizeUserAgentOverride(state[STORAGE_KEYS.USER_AGENT_OVERRIDE]),
         logs: state[STORAGE_KEYS.LOGS] || [],
         ruleStatuses: state[STORAGE_KEYS.RULE_STATUSES] || {}
@@ -791,6 +813,32 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         info: `PW Bot Detection override ${enabled ? "enabled" : "disabled"}`
       });
       sendResponse({ ok: true, pwBotDetectionEnabled: enabled });
+      return;
+    }
+
+    if (msg && msg.type === "set-csp-bypass-enabled") {
+      const state = await getState();
+      const current = !!state[STORAGE_KEYS.CSP_BYPASS_ENABLED];
+      const enabled = !!msg.enabled;
+      if (current === enabled) {
+        sendResponse({ ok: true, cspBypassEnabled: current });
+        return;
+      }
+      try {
+        await setState({ [STORAGE_KEYS.CSP_BYPASS_ENABLED]: enabled });
+        await rebuildDnrRules();
+      } catch (e) {
+        await setState({ [STORAGE_KEYS.CSP_BYPASS_ENABLED]: current });
+        await rebuildDnrRules().catch(() => {});
+        sendResponse({ ok: false, error: e && e.message ? e.message : String(e) });
+        return;
+      }
+      await appendLogAndNotify({
+        time: new Date().toISOString(),
+        info: `CSP header bypass ${enabled ? "enabled" : "disabled"}; reload webpages to apply`
+      });
+      await chrome.runtime.sendMessage({ type: "csp-bypass-state-updated" }).catch(() => {});
+      sendResponse({ ok: true, cspBypassEnabled: enabled });
       return;
     }
 

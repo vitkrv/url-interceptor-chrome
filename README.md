@@ -7,6 +7,7 @@ A Chrome extension that intercepts and redirects URLs using user-defined rules. 
 - Global enable/disable
 - Independent **Disable PW Bot Detection** override
 - Independent User-Agent override with attach or replace modes
+- Independent **Bypass CSP headers** toggle for local HTTP development
 - Categories with filtered rule lists and drag-and-drop assignment
 - Import/Export rules and categories as JSON
 - Quick share/import of a single rule via a compact text string
@@ -56,7 +57,15 @@ The extension ships with **all assets locally**; no network/CDN required.
 
 ### Global Toggle
 - Use the **Global redirects** switch on the top right to enable/disable redirect rules without deleting them.
-- This switch does not control the User-Agent override.
+- This switch does not control the User-Agent override or CSP header bypass.
+
+### CSP Header Bypass
+- Use **Bypass CSP headers** in the top bar to remove `Content-Security-Policy` response headers from HTTP(S) documents, frames, and scripts (including worker scripts).
+- Disabled by default and independent from Global redirects and User-Agent override. The setting persists across browser restarts.
+- This allows local HTTP URLs on any host or port through header CSP checks, but also removes all other restrictions in those CSP headers on all websites where the extension has access.
+- Reload webpages after enabling or disabling it. Previously loaded documents retain their existing policy until reloaded.
+- HTML `<meta>` CSP, mixed-content checks, local-network permissions, CORS, and other browser restrictions are not bypassed. Report-only CSP headers remain unchanged.
+- Enable/disable changes appear in Logs under Events.
 
 ### PW Bot Detection Override
 - Use **Disable PW Bot Detection** in the top bar to make page reads of `window._pwBotScore` return `99`.

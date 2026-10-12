@@ -21,6 +21,7 @@ const els = {
   btnCopyLogs: document.getElementById('btnCopyLogs'),
   btnClearLogs: document.getElementById('btnClearLogs'),
   pwBotDetectionToggle: document.getElementById('pwBotDetectionToggle'),
+  cspBypassToggle: document.getElementById('cspBypassToggle'),
   btnCustomizeUserAgent: document.getElementById('btnCustomizeUserAgent'),
   userAgentToggle: document.getElementById('userAgentToggle'),
   userAgentModal: document.getElementById('userAgentModal'),
@@ -328,6 +329,7 @@ async function refresh() {
   }
   els.globalToggle.checked = globalEnabled;
   els.pwBotDetectionToggle.checked = pwBotDetectionEnabled;
+  els.cspBypassToggle.checked = !!state.cspBypassEnabled;
   els.userAgentToggle.checked = userAgentOverride.enabled;
   renderCategoryOptions();
   renderCategories();
@@ -950,6 +952,27 @@ els.pwBotDetectionToggle.addEventListener('change', async () => {
   await refresh();
 });
 
+els.cspBypassToggle.addEventListener('change', async () => {
+  els.cspBypassToggle.disabled = true;
+  try {
+    const resp = await sendMessage({
+      type: 'set-csp-bypass-enabled',
+      enabled: els.cspBypassToggle.checked
+    });
+    if (!resp || !resp.ok) {
+      alert('Failed to update CSP header bypass: ' + (resp && resp.error || 'unknown'));
+    }
+  } catch (err) {
+    alert('Failed to update CSP header bypass: ' + err.message);
+  } finally {
+    try {
+      await refresh();
+    } finally {
+      els.cspBypassToggle.disabled = false;
+    }
+  }
+});
+
 // Global toggle
 els.globalToggle.addEventListener('change', async () => {
   await sendMessage({ type: 'set-global', enabled: els.globalToggle.checked });
@@ -1217,7 +1240,7 @@ function renderLogs() {
 
 // Live log updates
 chrome.runtime.onMessage.addListener((msg) => {
-  if (msg && msg.type === 'global-state-updated') {
+  if (msg && (msg.type === 'global-state-updated' || msg.type === 'csp-bypass-state-updated')) {
     refresh();
     return;
   }
