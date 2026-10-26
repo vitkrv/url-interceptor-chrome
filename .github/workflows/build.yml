@@ -1,0 +1,44 @@
+name: Build extension
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - name: Run tests
+        run: node --test
+      - name: Build ZIP
+        id: build
+        run: npm run build:ci
+      - name: Upload ZIP artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: url-redirector-${{ steps.build.outputs.version }}
+          path: ${{ steps.build.outputs.archive_path }}
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14

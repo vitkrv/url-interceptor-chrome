@@ -34,6 +34,8 @@ The extension ships with **all assets locally**; no network/CDN required.
 - `npm run build:ci` reuses the same build and exports the archive path and version as GitHub Actions step outputs.
 - The **Build extension** workflow runs tests and uploads the ZIP as a versioned artifact on pushes, pull requests, or manual runs. Download it from the workflow run's **Artifacts** section; the download contains `URL Redirector.zip` with the installable extension folder.
 
+The workflow uses a Windows runner with Node.js 24, retains artifacts for 14 days, and cancels superseded runs on the same branch. No dependencies or custom secrets are required. Commit and push `.github/workflows/build.yml`, `scripts/build-ci.ps1`, and `shared/version.js` along with the app changes to enable it. For a manual build, select **Actions → Build extension → Run workflow** after the workflow is on the default branch.
+
 When loading the repository directly as an unpacked extension, keep `manifest.json`'s version aligned with `package.json` as well. Packaged builds synchronize it automatically.
 
 ## Usage
