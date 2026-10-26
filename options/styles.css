@@ -32,6 +32,7 @@ body{
 .header-separator{width:1px; height:28px; background:rgba(255,255,255,.18)}
 .toggle-label{white-space:nowrap; color:var(--c-muted)}
 .container{display:grid; grid-template-columns: 1fr; gap:var(--gap); padding:var(--gap)}
+.app-version{padding:8px 16px 16px; text-align:center; font-size:10px; color:var(--c-muted)}
 @media(min-width: 980px){ .container{ grid-template-columns: 300px 1fr; } }
 .card{
   background:var(--c-card); border:1px solid rgba(255,255,255,.06);

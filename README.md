@@ -26,6 +26,16 @@ A Chrome extension that intercepts and redirects URLs using user-defined rules. 
 
 The extension ships with **all assets locally**; no network/CDN required.
 
+## Versioning and builds
+
+`package.json` is the source of the app version, displayed in a small centered footer in the Admin panel and popup. Update its `version` field using three numeric components (for example, `1.0.1`). The build copies this version into the packaged Chrome manifest.
+
+- `npm run build` creates `dist/URL Redirector/` and `dist/URL Redirector.zip` on Windows.
+- `npm run build:ci` reuses the same build and exports the archive path and version as GitHub Actions step outputs.
+- The **Build extension** workflow runs tests and uploads the ZIP as a versioned artifact on pushes, pull requests, or manual runs. Download it from the workflow run's **Artifacts** section; the download contains `URL Redirector.zip` with the installable extension folder.
+
+When loading the repository directly as an unpacked extension, keep `manifest.json`'s version aligned with `package.json` as well. Packaged builds synchronize it automatically.
+
 ## Usage
 ### Create a Rule
 1. Click **+ New Rule**.

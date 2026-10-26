@@ -1,5 +1,7 @@
 {
+  "version": "1.0.0",
   "scripts": {
-    "build": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build.ps1"
+    "build": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build.ps1",
+    "build:ci": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-ci.ps1"
   }
 }
