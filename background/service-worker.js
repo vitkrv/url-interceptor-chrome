@@ -919,6 +919,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       const current = state[STORAGE_KEYS.RULES] || [];
       const categories = normalizeCategories(state[STORAGE_KEYS.CATEGORIES]);
       const r = msg.rule;
+      if (r) {
+        for (const field of ["name", "source", "destination"]) {
+          r[field] = typeof r[field] === "string" ? r[field].trim() : "";
+        }
+      }
       // Basic validation
       if (!r || !r.name || !r.source || !r.destination) {
         sendResponse({ ok: false, error: "Missing fields" });

@@ -44,6 +44,8 @@ const els = {
   destinationError: document.getElementById('destinationError'),
   ruleId: document.getElementById('ruleId'),
   btnCancelRule: document.getElementById('btnCancelRule'),
+  btnSaveRule: document.getElementById('btnSaveRule'),
+  ruleNotification: document.getElementById('ruleNotification'),
   quickShareModal: document.getElementById('quickShareModal'),
   quickShareValue: document.getElementById('quickShareValue'),
   quickShareStatus: document.getElementById('quickShareStatus'),
@@ -86,6 +88,7 @@ let userAgentOverride = {
   value: 'Playwire/2.0'
 };
 let currentRuleEnabled = true;
+let ruleSaving = false;
 let selectedCategoryId = UNCATEGORIZED_ID;
 let pendingConfirm = null;
 let pendingCategoryDelete = null;
@@ -96,6 +99,22 @@ function clearRuleErrors() {
   els.nameError.textContent = '';
   els.sourceError.textContent = '';
   els.destinationError.textContent = '';
+  els.ruleNotification.textContent = '';
+  els.ruleNotification.hidden = true;
+}
+
+function notifyRuleError(message) {
+  els.ruleNotification.textContent = message;
+  els.ruleNotification.hidden = false;
+}
+
+function setRuleSaving(saving) {
+  ruleSaving = saving;
+  els.btnSaveRule.textContent = saving ? 'Saving…' : 'Save';
+  els.ruleForm.setAttribute('aria-busy', String(saving));
+  ['btnSaveRule', 'btnCancelRule', 'name', 'mode', 'category', 'source', 'destination'].forEach(id => {
+    els[id].disabled = saving;
+  });
 }
 
 function clearCategoryErrors() {
@@ -284,12 +303,14 @@ function updateSourcePlaceholder() {
     : 'e.g., https://target.com/b';
 }
 
-function sendMessage(payload) {
-  return new Promise((resolve) => {
+function sendMessage(payload, rejectOnError = false) {
+  return new Promise((resolve, reject) => {
     chrome.runtime.sendMessage(payload, (resp) => {
       // Access runtime.lastError to avoid "Unchecked runtime.lastError" warnings.
-      if (chrome.runtime.lastError) {
-        resolve(undefined);
+      const error = chrome.runtime.lastError;
+      if (error) {
+        if (rejectOnError) reject(new Error(error.message));
+        else resolve(undefined);
         return;
       }
       resolve(resp);
@@ -315,8 +336,12 @@ function getVisibleRules() {
   return rules.filter(rule => getRuleCategoryId(rule) === selectedCategoryId);
 }
 
-async function refresh() {
-  const state = await sendMessage({ type: 'get-state' }) || {};
+async function refresh(requireResponse = false) {
+  const response = await sendMessage({ type: 'get-state' }, requireResponse);
+  if (requireResponse && (!response || response.ok === false)) {
+    throw new Error(response && response.error || 'No response from the extension. Reload the extension and try again.');
+  }
+  const state = response || {};
   rules = state.rules || [];
   categories = state.categories || [];
   logs = (state.logs || []).slice(-1000);
@@ -776,7 +801,11 @@ els.btnYes.addEventListener('click', async () => {
 
 els.ruleForm.addEventListener('submit', async (e) => {
   e.preventDefault();
+  if (ruleSaving) return;
   clearRuleErrors();
+  ['name', 'source', 'destination'].forEach(id => {
+    els[id].value = els[id].value.trim();
+  });
   const rule = {
     id: els.ruleId.value || undefined,
     name: els.name.value.trim(),
@@ -797,27 +826,36 @@ els.ruleForm.addEventListener('submit', async (e) => {
     if (errors.name) els.nameError.textContent = errors.name;
     if (errors.source) els.sourceError.textContent = errors.source;
     if (errors.destination) els.destinationError.textContent = errors.destination;
+    notifyRuleError('Please correct the highlighted fields before saving.');
     return;
   }
-  const resp = await sendMessage({ type: 'save-rule', rule });
-  if (!resp || !resp.ok) {
-    if (resp) {
-      if (resp.error === 'Name exceeds 80 characters') {
-        els.nameError.textContent = resp.error;
-      } else if (/source|wildcard|contain/i.test(resp.error)) {
-        els.sourceError.textContent = resp.error;
-      } else if (/destination/i.test(resp.error)) {
-        els.destinationError.textContent = resp.error;
-      } else {
-        alert('Failed to save rule: ' + resp.error);
-      }
-    } else {
-      alert('Failed to save rule: unknown error');
+  setRuleSaving(true);
+  let saved = false;
+  try {
+    const resp = await sendMessage({ type: 'save-rule', rule }, true);
+    if (!resp || !resp.ok) {
+      const message = resp && resp.error || 'No response from the extension. Reload the extension and try again.';
+      if (/name/i.test(message)) els.nameError.textContent = message;
+      else if (/source|wildcard|contain/i.test(message)) els.sourceError.textContent = message;
+      else if (/destination/i.test(message)) els.destinationError.textContent = message;
+      throw new Error(message);
     }
-    return;
+    saved = true;
+    // Keep the saved ID so retrying after a refresh failure updates the same rule.
+    els.ruleId.value = resp.rule.id;
+    await refresh(true);
+    const status = ruleStatuses[resp.rule.id];
+    if (status && !status.ok) {
+      notifyRuleError('Rule saved, but could not be activated: ' + status.message);
+      return;
+    }
+    els.ruleModal.close();
+  } catch (error) {
+    const prefix = saved ? 'Rule saved, but the list could not be refreshed: ' : 'Failed to save rule: ';
+    notifyRuleError(prefix + (error && error.message || String(error)));
+  } finally {
+    setRuleSaving(false);
   }
-  await refresh();
-  els.ruleModal.close();
 });
 
 els.categoryForm.addEventListener('submit', async (e) => {
@@ -856,8 +894,13 @@ els.btnMoveRulesToUncategorized.addEventListener('click', () => beginCategoryDel
 els.btnDeleteCategoryRules.addEventListener('click', () => beginCategoryDelete('deleteRules'));
 
 // Cancel in rule modal
+els.ruleModal.addEventListener('cancel', (e) => {
+  if (ruleSaving) e.preventDefault();
+});
+
 els.btnCancelRule.addEventListener('click', (e) => {
   e.preventDefault();
+  if (ruleSaving) return;
   els.ruleModal.close();
 });
 
