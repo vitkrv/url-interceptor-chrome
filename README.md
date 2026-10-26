@@ -28,13 +28,22 @@ The extension ships with **all assets locally**; no network/CDN required.
 
 ## Versioning and builds
 
-`package.json` is the source of the app version, displayed in a small centered footer in the Admin panel and popup. Update its `version` field using three numeric components (for example, `1.0.1`). The build copies this version into the packaged Chrome manifest.
+`package.json` is the source of the app version, displayed in a small centered footer in the Admin panel and popup. Use three numeric components (for example, `1.0.1`). The build copies this version into the packaged Chrome manifest.
 
 - `npm run build` creates `dist/URL Redirector/` and `dist/URL Redirector.zip` on Windows.
 - `npm run build:ci` reuses the same build and exports the archive path and version as GitHub Actions step outputs.
-- The **Build extension** workflow runs tests and uploads the ZIP as a versioned artifact on pushes, pull requests, or manual runs. Download it from the workflow run's **Artifacts** section; the download contains `URL Redirector.zip` with the installable extension folder.
+- The **Release extension** workflow runs only when a new version tag such as `v1.2.0` is pushed. It verifies the tag matches `package.json`, runs tests, builds the ZIP, and publishes a GitHub release for that tag with generated release notes and `URL Redirector.zip` attached under **Assets**.
 
-The workflow uses a Windows runner with Node.js 24, retains artifacts for 14 days, and cancels superseded runs on the same branch. No dependencies or custom secrets are required. Commit and push `.github/workflows/build.yml`, `scripts/build-ci.ps1`, and `shared/version.js` along with the app changes to enable it. For a manual build, select **Actions → Build extension → Run workflow** after the workflow is on the default branch.
+The workflow uses a Windows runner with Node.js 24 and the built-in `GITHUB_TOKEN` with `contents: write` permission. No dependencies or custom secrets are required. Ordinary branch pushes and pull requests do not trigger it, and there is no manual trigger. Commit the workflow, build scripts, and app changes before creating a version tag so the tagged commit contains everything needed to build.
+
+To publish a release from a clean working tree:
+
+```sh
+npm version patch
+git push origin HEAD --follow-tags
+```
+
+Use `npm version minor` or `npm version major` for other version increments. `npm version` updates `package.json`, commits the change, and creates the `v`-prefixed version tag; you can also push tags separately with `git push origin --tags`. Download the packaged extension from the corresponding GitHub release's **Assets** section.
 
 When loading the repository directly as an unpacked extension, keep `manifest.json`'s version aligned with `package.json` as well. Packaged builds synchronize it automatically.
 
