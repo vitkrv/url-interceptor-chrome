@@ -6,6 +6,8 @@ const els = {
 };
 
 let currentTabId = null;
+let popupLoaded = false;
+let refreshing = false;
 
 function sendMessage(payload) {
   return new Promise((resolve) => {
@@ -26,11 +28,12 @@ async function getCurrentTabId() {
 }
 
 function renderAppliedRules(names) {
+  document.getElementById('activityCount').textContent = names.length;
   els.appliedRules.innerHTML = '';
   if (!names.length) {
     const empty = document.createElement('li');
     empty.className = 'empty';
-    empty.textContent = 'No rules applied yet.';
+    empty.textContent = currentTabId === null ? 'No available tab.' : 'No recorded rule activity on this page.';
     els.appliedRules.appendChild(empty);
     return;
   }
@@ -43,18 +46,31 @@ function renderAppliedRules(names) {
 }
 
 async function refresh() {
-  currentTabId = await getCurrentTabId();
-  const state = await sendMessage({ type: 'get-popup-state', tabId: currentTabId }) || {};
-  els.globalToggle.checked = state.globalEnabled !== false;
-  renderAppliedRules(state.appliedRules || []);
+  if (refreshing) return;
+  refreshing = true; els.globalToggle.disabled = true;
+  try {
+    currentTabId = await getCurrentTabId();
+    const state = await sendMessage({type:'get-popup-state',tabId:currentTabId});
+    if (!state || typeof state.globalEnabled !== 'boolean') throw new Error('Could not load extension state. Retry or reload the extension.');
+    els.globalToggle.checked = state.globalEnabled;
+    document.getElementById('popupState').textContent = state.globalEnabled ? 'On' : 'Paused';
+    renderAppliedRules(state.appliedRules || []); popupLoaded = true;
+    document.getElementById('popupError').hidden = true; document.getElementById('retryPopup').hidden = true;
+  } catch(e) { showError(e.message); }
+  finally { refreshing = false; els.globalToggle.disabled = !popupLoaded; }
 }
+function showError(message) { document.getElementById('popupError').textContent = message; document.getElementById('popupError').hidden = false; document.getElementById('retryPopup').hidden = false; if(!popupLoaded) { els.appliedRules.textContent = ''; document.getElementById('popupState').textContent = 'Unavailable'; } }
+document.getElementById('retryPopup').addEventListener('click',refresh);
 
 els.openOptions.addEventListener('click', () => {
   chrome.runtime.openOptionsPage();
 });
 
 els.globalToggle.addEventListener('change', async () => {
-  await sendMessage({ type: 'set-global', enabled: els.globalToggle.checked });
+  els.globalToggle.disabled = true;
+  const old = !els.globalToggle.checked;
+  const result = await sendMessage({ type: 'set-global', enabled: els.globalToggle.checked });
+  if (!result?.ok) { els.globalToggle.checked = old; showError(result?.error || 'Could not update redirects.'); els.globalToggle.disabled = false; return; }
   await refresh();
 });
 

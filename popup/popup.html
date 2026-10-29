@@ -1,26 +1,26 @@
 
 <!doctype html>
-<html>
+<html lang="en">
   <head>
     <meta charset="utf-8">
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; object-src 'none'">
     <title>Requests Interceptor</title>
-    <link rel="stylesheet" href="popup.css">
+    <link rel="stylesheet" href="../shared/ui.css"><link rel="stylesheet" href="popup.css">
   </head>
   <body>
     <div class="wrap">
-      <h3>Requests Interceptor</h3>
+      <div class="popup-brand"><img src="../icons/icon128.png" width="32" height="32" alt=""><h3>Requests Interceptor</h3></div>
       <label class="switch-row">
-        <span>Global rules</span>
+        <span>Redirects <span id="popupState">Loading…</span></span>
         <span class="switch">
           <input type="checkbox" id="globalToggle">
           <span class="slider"></span>
         </span>
       </label>
-      <button class="btn" id="openOptions" type="button">Open Admin Panel</button>
+      <button class="btn" id="openOptions" type="button">Open rule manager</button>
       <hr>
-      <div class="section-title">Active on this page</div>
-      <ul id="appliedRules" class="rules"></ul>
+      <div class="section-title">Applied on this page <span id="activityCount">0</span></div>
+      <ul id="appliedRules" class="rules"><li class="empty">Loading activity…</li></ul><div id="popupError" role="alert" hidden></div><button id="retryPopup" class="btn outlined" hidden>Retry</button>
       <footer id="appVersion" class="app-version" aria-label="App version"></footer>
     </div>
     <script src="../shared/version.js"></script>

@@ -47,6 +47,20 @@ Use `npm version minor` or `npm version major` for other version increments. `np
 
 When loading the repository directly as an unpacked extension, keep `manifest.json`'s version aligned with `package.json` as well. Packaged builds synchronize it automatically.
 
+## Interface
+
+The admin panel has three views: **Rules**, **Logs**, and **Settings**.
+
+- **Rules** starts with All rules. Choose a category, search names/URLs/categories, or combine enabled-state and mode filters. Clear filters before reordering with the drag handle or Move up/down in a rule's menu. Assign categories through dragging or Edit.
+- Use **Paste shared rule** in Rules for a shared rule string. **Import JSON** and **Export JSON** are in Settings; export includes the complete collection.
+- **Logs** provides live activity, search, event filters, Pause/Continue, Copy visible, and Clear. Pause freezes the displayed snapshot while collection continues.
+- **Settings** contains independent UA, PW Bot, and CSP controls. Active overrides appear in the header even while redirects are paused.
+- The popup shows Redirects status and recorded rules applied on the current page. **Open rule manager** opens the workspace.
+
+Run automated checks with: node --test tests/*.test.cjs
+
+Search in Rules and Logs is case-insensitive. Whitespace separates AND terms: every term must appear as a full or partial match, in any order, across the searchable fields. For example, `local page` matches `PageOS` with a destination containing `localhost`.
+
 ## Usage
 ### Create a Rule
 1. Click **+ New Rule**.
@@ -63,7 +77,7 @@ When loading the repository directly as an unpacked extension, keep `manifest.js
 - Category rows show total rules and enabled rules.
 - Select a category to filter the rules list.
 - Drag a rule to a category in the sidebar to assign or reassign it.
-- Use **Settings** on a selected category to rename or remove it. Removing a category asks whether assigned rules should be deleted or moved to Uncategorized.
+- Use the pencil beside the selected category title to rename it, or the red trash icon to remove it. Removing a category asks whether assigned rules should be deleted or moved to Uncategorized.
 
 ### Edit / Delete
 - **Edit** opens a pre-filled modal.
@@ -81,7 +95,7 @@ When loading the repository directly as an unpacked extension, keep `manifest.js
 - This switch does not control the User-Agent override or CSP header bypass.
 
 ### CSP Header Bypass
-- Use **Bypass CSP headers** in the top bar to remove `Content-Security-Policy` response headers from HTTP(S) documents, frames, and scripts (including worker scripts).
+- Use **Bypass CSP headers** in Settings to remove `Content-Security-Policy` response headers from HTTP(S) documents, frames, and scripts (including worker scripts).
 - Disabled by default and independent from Global redirects and User-Agent override. The setting persists across browser restarts.
 - This allows local HTTP URLs on any host or port through header CSP checks, but also removes all other restrictions in those CSP headers on all websites where the extension has access.
 - Reload webpages after enabling or disabling it. Previously loaded documents retain their existing policy until reloaded.
@@ -89,7 +103,7 @@ When loading the repository directly as an unpacked extension, keep `manifest.js
 - Enable/disable changes appear in Logs under Events.
 
 ### PW Bot Detection Override
-- Use **Disable PW Bot Detection** in the top bar to make page reads of `window._pwBotScore` return `99`.
+- Use **Disable PW Bot Detection** in Settings to make page reads of `window._pwBotScore` return `99`.
 - This switch is independent from Global redirects and User-Agent override.
 
 ### User-Agent Override
@@ -114,7 +128,7 @@ When loading the repository directly as an unpacked extension, keep `manifest.js
 - Only active rules generate logs.
 - User-Agent override enable, disable, and configuration changes are logged once per change.
 - Use search and event type filters to narrow the visible log list.
-- Use **Pause** to freeze the modal view without stopping log collection; **Continue** refreshes it again.
+- Use **Pause** to freeze the displayed view without stopping log collection; **Continue** refreshes it again.
 - Use **Copy visible** to copy the currently filtered logs as plain text.
 - Click **Clear** to wipe logs.
 

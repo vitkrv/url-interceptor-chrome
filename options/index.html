@@ -7,7 +7,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Requests Interceptor — Admin</title>
     <link rel="icon" href="../icons/icon128.png">
-    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="../shared/ui.css"><link rel="stylesheet" href="styles.css">
   </head>
   <body>
     <header class="topbar">
@@ -18,67 +18,49 @@
           <span>Rules • Redirects • Logs</span>
         </div>
       </div>
-      <div class="actions">
-        <div class="action-group" title="Removes website CSP headers on all HTTP(S) pages, allowing local HTTP URLs and removing other header CSP restrictions. Reload webpages after changing. HTML meta CSP and other browser restrictions still apply.">
-          <label class="switch">
-            <input type="checkbox" id="cspBypassToggle" aria-label="Bypass CSP headers">
-            <span class="slider"></span>
-          </label>
-          <label class="toggle-label" for="cspBypassToggle">Bypass CSP headers</label>
-        </div>
-        <div class="header-separator"></div>
-        <label class="switch" title="Disable PW Bot Detection">
-          <input type="checkbox" id="pwBotDetectionToggle">
-          <span class="slider"></span>
-        </label>
-        <span class="toggle-label">Disable PW Bot Detection</span>
-        <div class="header-separator"></div>
-        <div class="action-group">
-          <button id="btnCustomizeUserAgent" class="btn outlined" type="button">Customize UA</button>
-          <label class="switch" title="Enable User Agent override">
-            <input type="checkbox" id="userAgentToggle">
-            <span class="slider"></span>
-          </label>
-          <span class="toggle-label">UA</span>
-        </div>
-        <div class="header-separator"></div>
-        <label class="switch">
-          <input type="checkbox" id="globalToggle">
-          <span class="slider"></span>
-        </label>
-        <span class="toggle-label">Global redirects</span>
-        <button id="btnLogs" class="btn">Logs</button>
-      </div>
+      <div class="header-notice-slot" role="status"><div id="pausedNotice" hidden>Redirects are paused. Independently enabled overrides remain active.</div></div>
+      <div class="header-state"><div id="overrideIndicators"></div><label class="redirect-control">Redirects<span class="switch"><input type="checkbox" id="globalToggle" aria-label="Enable redirects"><span class="slider"></span></span></label></div>
     </header>
+    <nav class="navigation" aria-label="Main navigation"><a href="#rules">Rules</a><a href="#logs">Logs</a><a href="#settings">Settings</a></nav>
+    <div id="loadError" class="load-error" role="alert" hidden><span></span><button id="retryLoad" class="btn outlined">Retry</button></div>
+    <main>
+    <section id="rulesView" class="view container">
+      <aside class="controls card"><div class="categories-header"><h2>Categories</h2><button id="btnNewCategory" class="btn outlined compact">Add</button></div><div id="categoriesList" class="categories-list"></div></aside>
+      <section class="rules"><div class="page-heading"><div><p class="eyebrow">REDIRECT WORKSPACE</p><div class="category-title"><h1 id="rulesTitle">All rules</h1><div id="categoryTitleActions" class="row" hidden><button id="btnRenameCategory" class="btn text icon-btn" type="button" aria-label="Rename category" title="Rename category"></button><button id="btnDeleteCategory" class="btn text icon-btn category-delete" type="button" aria-label="Remove category" title="Remove category"></button></div></div><p id="rulesCount" class="small"></p></div><div class="row"><button id="btnQuickImport" class="btn outlined" type="button">Paste shared rule</button><button id="btnNew" class="btn">Create rule</button></div></div>
+      <div class="mobile-categories"><label>Category<select id="categoryFilter"></select></label><button id="mobileNewCategory" class="btn outlined">Add category</button></div>
+      <div class="filterbar card"><label class="search-field">Search rules<input id="ruleSearch" type="search" placeholder="Name, URL, or category"></label><label>Enabled state<select id="enabledFilter"><option value="all">All states</option><option value="enabled">Enabled</option><option value="disabled">Disabled</option></select></label><label>Mode<select id="modeFilter"><option value="all">All modes</option><option value="exact">Exact</option><option value="wildcard">Wildcard</option><option value="contain">Contain</option><option value="domain">Domain</option></select></label><button id="clearFilters" class="btn text">Clear filters</button></div>
+      <p id="orderHint" class="small" hidden>Clear search and filters to reorder rules.</p><div id="rulesList" class="list"></div></section>
+    </section>
+    <section id="logsView" class="view page" hidden></section>
+    <section id="settingsView" class="view page" hidden><p class="eyebrow">BROWSER BEHAVIOR</p><h1>Settings</h1><p class="small">These overrides operate independently from Redirects.</p>
+      <section id="uaSettings" class="card setting-card"><div class="setting-heading"><div><h2>User-Agent override</h2><p id="uaSummary" class="small"></p></div><label class="switch"><input type="checkbox" id="userAgentToggle" aria-label="Enable User-Agent override"><span class="slider"></span></label></div><div id="uaEditor"><form novalidate id="userAgentForm">
 
-    <main class="container">
-      <section class="controls card">
-        <div class="row">
-          <button id="btnNew" class="btn">Create Rule</button>
+
+        <fieldset id="uaModeButtons" class="mode-field"><legend>Override type</legend><div class="mode-buttons ua-mode-buttons"><label><input type="radio" name="uaType" value="attach" checked><span>Attach</span></label><label><input type="radio" name="uaType" value="replace"><span>Replace</span></label></div><input type="hidden" id="userAgentMode" name="userAgentMode" value="attach"></fieldset>
+
+        <label class="field">
+          <span>UA value</span>
+          <input type="text" aria-describedby="userAgentError" id="userAgentValue" name="userAgentValue" required placeholder="Playwire/2.0">
+          <div class="error" id="userAgentError"></div>
+        </label>
+
+        <div class="modal-actions ua-actions" id="uaActions">
+          <button id="btnCancelUserAgent" type="button" value="cancel" class="btn text">Reset</button>
+          <button id="btnSaveUserAgent" class="btn">Save changes</button>
         </div>
-        <div class="sidebar-separator"></div>
-        <button id="btnQuickImport" class="btn quick-import" type="button">Quick import</button>
-        <div class="sidebar-separator"></div>
-        <div class="categories-header">
-          <h2>Categories</h2>
-          <button id="btnNewCategory" class="btn outlined compact" type="button">Add</button>
-        </div>
-        <div id="categoriesList" class="categories-list"></div>
-        <div class="sidebar-separator"></div>
-        <div class="full-actions">
-          <label class="btn outlined file-label">
-            Full import <input type="file" id="fileImport" accept="application/json">
-          </label>
-          <button id="btnExport" class="btn outlined" type="button">Full export</button>
+      </form></div></section>
+      <section id="pwBotSettings" class="card setting-card"><div class="setting-heading"><div><h2>PW Bot Detection override</h2><p class="small">Page reads of <code>window._pwBotScore</code> return <code>99</code>.</p></div><label class="switch"><input type="checkbox" id="pwBotDetectionToggle" aria-label="Enable PW Bot Detection override"><span class="slider"></span></label></div></section>
+      <section id="cspSettings" class="card setting-card"><div class="setting-heading"><div><h2>CSP header bypass</h2><p class="small">Removes enforcing Content-Security-Policy response headers across all HTTP(S) websites, including documents, frames, and scripts.</p></div><label class="switch"><input type="checkbox" id="cspBypassToggle" aria-label="Bypass CSP headers"><span class="slider"></span></label></div><p class="notice">Reload webpages after changing this setting. This removes other header CSP restrictions as well.</p><p class="small">HTML meta CSP, report-only headers, mixed-content checks, local-network permissions, CORS, and other browser restrictions remain in effect.</p></section>
+      <section class="card setting-card" aria-labelledby="dataSettingsTitle">
+        <h2 id="dataSettingsTitle">Import and export</h2>
+        <p class="small">Import rules and categories from JSON, or export the complete collection. Current rule filters do not affect the export.</p>
+        <div class="row data-actions">
+          <button id="btnImportJson" class="btn outlined" type="button">Import JSON</button>
+          <input type="file" id="fileImport" accept="application/json" hidden>
+          <button id="btnExport" class="btn outlined" type="button">Export JSON</button>
         </div>
       </section>
-
-      <section class="rules card">
-        <h2>Rules</h2>
-        <div id="rulesList" class="list"></div>
-      </section>
-    </main>
-
+    </section></main>
     <footer id="appVersion" class="app-version" aria-label="App version"></footer>
 
     <!-- Rule Modal -->
@@ -88,20 +70,21 @@
           <div id="ruleNotification" class="rule-notification" role="alert" hidden></div>
 
         <label class="field">
-          <span>Name (≤80)</span>
+          <span>Name <span id="nameCount">0 / 80</span></span>
           <input type="text" id="name" name="name" maxlength="80" required>
           <div class="error" id="nameError"></div>
         </label>
 
-        <label class="field">
-          <span>Mode</span>
-          <select id="mode" name="mode">
-            <option value="exact">Exact match</option>
-            <option value="wildcard">Wildcard (*)</option>
-            <option value="contain">Contain</option>
-            <option value="domain">Domain redirect</option>
-          </select>
-        </label>
+        <fieldset id="modeButtons" class="mode-field">
+          <legend>Mode</legend>
+          <div class="mode-buttons">
+            <label><input type="radio" name="ruleMode" value="exact" checked><span>Exact match</span></label>
+            <label><input type="radio" name="ruleMode" value="wildcard"><span>Wildcard (*)</span></label>
+            <label><input type="radio" name="ruleMode" value="contain"><span>Contain</span></label>
+            <label><input type="radio" name="ruleMode" value="domain"><span>Domain redirect</span></label>
+          </div>
+          <input type="hidden" id="mode" name="mode" value="exact">
+        </fieldset>
 
         <label class="field">
           <span>Category</span>
@@ -111,23 +94,18 @@
         </label>
 
         <label class="field">
-          <span>Source URL / Pattern</span>
+          <span><span id="sourceLabel">Source URL / Pattern</span></span>
           <input type="text" id="source" name="source" required placeholder="e.g., https://example.com/*/a">
           <div class="error" id="sourceError"></div>
         </label>
 
         <label class="field">
-          <span>Destination URL</span>
+          <span><span id="destinationLabel">Destination URL</span></span>
           <input type="text" id="destination" name="destination" required placeholder="e.g., https://target.com/b">
           <div class="error" id="destinationError"></div>
         </label>
 
-        <div class="hint small">
-          • In Wildcard mode use * to match any characters.<br/>
-          • Contain mode uses substring matching.<br/>
-          • Domain mode redirects a host and its subdomains while preserving path and query.<br/>
-          • Exact mode matches the whole URL.
-        </div>
+        <div id="modeHelp" class="hint small"></div>
 
         <div class="modal-actions">
           <button id="btnCancelRule" type="button" value="cancel" class="btn text">Cancel</button>
@@ -166,13 +144,13 @@
         </label>
         <div class="modal-actions">
           <button id="btnCancelQuickImport" type="button" class="btn text">Cancel</button>
-          <button id="btnParseQuickImport" class="btn">Continue</button>
+          <button id="btnParseQuickImport" class="btn">Review rule</button>
         </div>
       </form>
     </dialog>
 
     <!-- Category Settings Modal -->
-    <dialog id="categoryModal" class="modal">
+    <dialog id="categoryModal" class="modal" aria-labelledby="categoryModalTitle">
       <form method="dialog" id="categoryForm">
         <h3 id="categoryModalTitle">Create Category</h3>
         <label class="field">
@@ -181,7 +159,6 @@
           <div class="error" id="categoryNameError"></div>
         </label>
         <div class="modal-actions">
-          <button id="btnDeleteCategory" type="button" class="btn danger">Remove</button>
           <div class="spacer"></div>
           <button id="btnCancelCategory" type="button" value="cancel" class="btn text">Cancel</button>
           <button id="btnSaveCategory" class="btn">Save</button>
@@ -197,7 +174,7 @@
         <div class="modal-actions">
           <button id="btnCancelCategoryDeleteChoice" class="btn text" type="button">Cancel</button>
           <button id="btnMoveRulesToUncategorized" class="btn outlined" type="button">Move to Uncategorized</button>
-          <button id="btnDeleteCategoryRules" class="btn danger" type="button">Delete Rules</button>
+          <button id="btnDeleteCategoryRules" class="btn danger" type="button">Delete category and rules</button>
         </div>
       </div>
     </dialog>
@@ -207,37 +184,13 @@
       <div class="confirm-content">
         <p id="confirmText">Are you sure?</p>
         <div class="modal-actions">
-          <button id="btnNo" class="btn text">No</button>
-          <button id="btnYes" class="btn danger">Yes</button>
+          <button id="btnNo" class="btn text">Cancel</button>
+          <button id="btnYes" class="btn danger">Confirm</button>
         </div>
       </div>
     </dialog>
 
-    <!-- User Agent Override Modal -->
-    <dialog id="userAgentModal" class="modal">
-      <form method="dialog" id="userAgentForm">
-        <h3>User Agent Override</h3>
 
-        <label class="field">
-          <span>Override Type</span>
-          <select id="userAgentMode" name="userAgentMode">
-            <option value="attach">Attach</option>
-            <option value="replace">Replace</option>
-          </select>
-        </label>
-
-        <label class="field">
-          <span>User Agent Value</span>
-          <input type="text" id="userAgentValue" name="userAgentValue" required placeholder="Playwire/2.0">
-          <div class="error" id="userAgentError"></div>
-        </label>
-
-        <div class="modal-actions">
-          <button id="btnCancelUserAgent" type="button" value="cancel" class="btn text">Cancel</button>
-          <button id="btnSaveUserAgent" class="btn">Save</button>
-        </div>
-      </form>
-    </dialog>
 
     <!-- Logs Modal -->
     <dialog id="logsModal" class="modal modal-lg">
@@ -266,6 +219,7 @@
     </dialog>
 
     <script src="../shared/version.js"></script>
-    <script src="options.js"></script>
+    <script src="../shared/search.js"></script>
+    <script src="options.js"></script><script src="workspace.js"></script>
   </body>
 </html>
