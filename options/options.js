@@ -341,8 +341,11 @@ function getVisibleRules() {
     && matchesSearch([rule.name, rule.source, rule.destination, getCategoryById(rule.categoryId)?.name || 'Uncategorized']));
 }
 
+let refreshVersion = 0;
 async function refresh(requireResponse = false) {
+  const version = ++refreshVersion;
   const response = await sendMessage({ type: 'get-state' }, requireResponse);
+  if (version !== refreshVersion) return;
   if (requireResponse && (!response || response.ok === false)) {
     throw new Error(response && response.error || 'No response from the extension. Reload the extension and try again.');
   }
@@ -388,15 +391,26 @@ function ruleBadge(mode) {
 }
 
 function getRuleStatus(rule) {
+  const status = ruleStatuses[rule.id];
+  if (status) return status;
   if (!rule.enabled) return { ok: true, message: 'Disabled' };
   if (!globalEnabled) return { ok: true, message: 'Redirects paused' };
-  return ruleStatuses[rule.id] || { ok: false, message: 'Pending' };
+  return { ok: false, message: 'Pending' };
 }
 
 function statusBadge(rule) {
   const status = getRuleStatus(rule);
+  if (status.phase === 'queued' || status.phase === 'applying') return createBadge(status.message, 'cyan');
+  if (status.message === 'Pending') return createBadge(status.message, 'gray');
+  if (!status.ok) {
+    const badge = createBadge('Apply failed', 'error');
+    badge.title = status.message + ' Previously applied redirects may still be active. Edit and save to retry.';
+    badge.setAttribute('aria-label', badge.title);
+    return badge;
+  }
+  if (status.message === 'Installed') return createBadge('Applied', 'ok');
   if (status.message === 'Disabled') return createBadge(status.message, 'gray');
-  if (status.message === 'Global disabled' || status.message === 'Redirects paused' || status.message === 'Pending') return createBadge(status.message, 'gray');
+  if (status.message === 'Global disabled' || status.message === 'Redirects paused') return createBadge(status.message, 'gray');
   const className = status.ok ? 'ok' : 'error';
   return createBadge(status.message, className);
 }
@@ -819,7 +833,6 @@ els.ruleForm.addEventListener('submit', async (e) => {
     return;
   }
   setRuleSaving(true);
-  let saved = false;
   try {
     const resp = await sendMessage({ type: 'save-rule', rule }, true);
     if (!resp || !resp.ok) {
@@ -829,19 +842,19 @@ els.ruleForm.addEventListener('submit', async (e) => {
       else if (/destination/i.test(message)) els.destinationError.textContent = message;
       throw new Error(message);
     }
-    saved = true;
-    // Keep the saved ID so retrying after a refresh failure updates the same rule.
+    // Persistence is complete; application continues independently in the worker.
     els.ruleId.value = resp.rule.id;
-    await refresh(true);
-    const status = ruleStatuses[resp.rule.id];
-    if (status && !status.ok) {
-      notifyRuleError('Rule saved, but could not be activated: ' + status.message);
-      return;
-    }
+    ++refreshVersion;
+    const index = rules.findIndex(existing => existing.id === resp.rule.id);
+    if (index < 0) rules.unshift(resp.rule);
+    else rules[index] = resp.rule;
+    ruleStatuses[resp.rule.id] = resp.status || { ok: true, phase: 'queued', message: 'Saved · queued' };
     els.ruleModal.close();
+    renderCategories();
+    renderRules();
+    refresh().catch(error => notify('Rule saved, but status could not be refreshed: ' + error.message));
   } catch (error) {
-    const prefix = saved ? 'Rule saved, but the list could not be refreshed: ' : 'Failed to save rule: ';
-    notifyRuleError(prefix + (error && error.message || String(error)));
+    notifyRuleError('Failed to save rule: ' + (error && error.message || String(error)));
   } finally {
     setRuleSaving(false);
   }
@@ -1216,7 +1229,7 @@ function renderLogs() {
 
 // Live log updates
 chrome.runtime.onMessage.addListener((msg) => {
-  if (msg && (msg.type === 'global-state-updated' || msg.type === 'csp-bypass-state-updated')) {
+  if (msg && (msg.type === 'rule-statuses-updated' || msg.type === 'global-state-updated' || msg.type === 'csp-bypass-state-updated')) {
     refresh();
     return;
   }

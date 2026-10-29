@@ -75,6 +75,29 @@ const ACTION_ICON = {
 };
 let logWriteQueue = Promise.resolve();
 let ruleActivityQueue = Promise.resolve();
+let ruleSaveQueue = Promise.resolve();
+let dnrUpdateQueue = Promise.resolve();
+let applicationScheduled = false;
+
+function withRuleStorage(task) {
+  const result = ruleSaveQueue.catch(() => {}).then(task);
+  ruleSaveQueue = result;
+  return result;
+}
+
+function notifyRuleStatuses() {
+  // UI listeners must never hold up persistence or application.
+  chrome.runtime.sendMessage({ type: "rule-statuses-updated" }).catch(() => {});
+}
+
+function scheduleRuleApplication() {
+  if (applicationScheduled) return;
+  applicationScheduled = true;
+  // Clear the flag when this queued build starts, so edits during it queue another.
+  rebuildDnrRules(() => { applicationScheduled = false; }).catch(error => {
+    console.error("Failed to apply saved rules", error);
+  });
+}
 const activePwBotFrames = new Map();
 const tabRuleActivityFallback = {};
 
@@ -640,7 +663,16 @@ function toCspBypassDnrRule(enabled) {
   };
 }
 
-async function rebuildDnrRules() {
+function rebuildDnrRules(onStart = () => {}) {
+  const result = dnrUpdateQueue.catch(() => {}).then(() => {
+    onStart();
+    return applyDnrRules();
+  });
+  dnrUpdateQueue = result;
+  return result;
+}
+
+async function applyDnrRules() {
   const state = await getState();
   const { RULES, GLOBAL_ENABLED, MAP } = STORAGE_KEYS;
   const rules = state[RULES] || [];
@@ -648,60 +680,87 @@ async function rebuildDnrRules() {
   const idMap = state[MAP] || {};
   const statuses = {};
   const add = [];
-  const userAgentRule = toUserAgentDnrRule(state[STORAGE_KEYS.USER_AGENT_OVERRIDE]);
-  if (userAgentRule) add.push(userAgentRule);
-  const cspBypassRule = toCspBypassDnrRule(state[STORAGE_KEYS.CSP_BYPASS_ENABLED]);
-  if (cspBypassRule) add.push(cspBypassRule);
+  await publishApplicationStatuses(state, Object.fromEntries(rules.map(rule => [
+    rule.id, { ...makeRuleStatus(true, "Applying…"), phase: "applying" }
+  ])));
+  try {
+    const userAgentRule = toUserAgentDnrRule(state[STORAGE_KEYS.USER_AGENT_OVERRIDE]);
+    if (userAgentRule) add.push(userAgentRule);
+    const cspBypassRule = toCspBypassDnrRule(state[STORAGE_KEYS.CSP_BYPASS_ENABLED]);
+    if (cspBypassRule) add.push(cspBypassRule);
 
-  if (!globalEnabled) {
-    for (const r of rules) {
-      statuses[r.id] = makeRuleStatus(true, r.enabled ? "Global disabled" : "Disabled");
-    }
-  } else {
-    // Build redirect rules only while global redirects are enabled.
-    for (const r of rules) {
-      if (!r.enabled) {
-        statuses[r.id] = makeRuleStatus(true, "Disabled");
-        continue;
+    if (!globalEnabled) {
+      for (const r of rules) {
+        statuses[r.id] = makeRuleStatus(true, r.enabled ? "Global disabled" : "Disabled");
       }
-
-      const dnrId = idMap[r.id] || state[STORAGE_KEYS.NEXT_DNR_ID] || 1000;
-      const result = await toDnrRule(r, dnrId);
-      statuses[r.id] = result.status;
-
-      if (result.dnrRule) {
-        if (!idMap[r.id]) {
-          idMap[r.id] = dnrId;
-          state[STORAGE_KEYS.NEXT_DNR_ID] = dnrId + 1;
+    } else {
+      // Build redirect rules only while global redirects are enabled.
+      for (const r of rules) {
+        if (!r.enabled) {
+          statuses[r.id] = makeRuleStatus(true, "Disabled");
+          continue;
         }
-        add.push(result.dnrRule);
-      } else {
-        // rule invalid; drop its mapping so ids can be reused
-        delete idMap[r.id];
+
+        const dnrId = idMap[r.id] || state[STORAGE_KEYS.NEXT_DNR_ID] || 1000;
+        const result = await toDnrRule(r, dnrId);
+        statuses[r.id] = result.status;
+
+        if (result.dnrRule) {
+          if (!idMap[r.id]) {
+            idMap[r.id] = dnrId;
+            state[STORAGE_KEYS.NEXT_DNR_ID] = dnrId + 1;
+          }
+          add.push(result.dnrRule);
+        } else {
+          // rule invalid; drop its mapping so ids can be reused
+          delete idMap[r.id];
+        }
       }
     }
+
+    const existing = await chrome.declarativeNetRequest.getDynamicRules();
+    const removeIds = existing.map(r => r.id);
+
+    // Replace existing dynamic rules entirely to avoid duplicate IDs
+    await chrome.declarativeNetRequest.updateDynamicRules({
+      removeRuleIds: removeIds,
+      addRules: add
+    });
+
+    await publishApplicationStatuses(state, statuses, idMap);
+  } catch (error) {
+    const failed = Object.fromEntries(rules.map(rule => [rule.id, {
+      ...makeRuleStatus(false, "Apply failed: " + (error.message || String(error))),
+      phase: "failed"
+    }]));
+    await publishApplicationStatuses(state, failed);
+    throw error;
   }
+}
 
-  const existing = await chrome.declarativeNetRequest.getDynamicRules();
-  const removeIds = existing.map(r => r.id);
-
-  // Replace existing dynamic rules entirely to avoid duplicate IDs
-  await chrome.declarativeNetRequest.updateDynamicRules({
-    removeRuleIds: removeIds,
-    addRules: add
+async function publishApplicationStatuses(snapshot, statuses, idMap = null) {
+  await withRuleStorage(async () => {
+    const current = await getState();
+    const next = { ...current[STORAGE_KEYS.RULE_STATUSES] };
+    const signature = rule => JSON.stringify([rule.mode, rule.source, rule.destination, rule.enabled]);
+    const originals = new Map(snapshot.rules.map(rule => [rule.id, signature(rule)]));
+    for (const rule of current.rules) {
+      // An edit saved during this build still needs its own application result.
+      if (originals.get(rule.id) === signature(rule) &&
+          snapshot.ruleStatuses[rule.id]?.operationId === next[rule.id]?.operationId &&
+          snapshot.globalEnabled === current.globalEnabled) {
+        next[rule.id] = { ...statuses[rule.id], operationId: next[rule.id]?.operationId };
+      }
+    }
+    const patch = { [STORAGE_KEYS.RULE_STATUSES]: next };
+    if (idMap) {
+      patch[STORAGE_KEYS.MAP] = Object.fromEntries(current.rules
+        .filter(rule => idMap[rule.id]).map(rule => [rule.id, idMap[rule.id]]));
+      patch[STORAGE_KEYS.NEXT_DNR_ID] = snapshot[STORAGE_KEYS.NEXT_DNR_ID];
+    }
+    await setState(patch);
   });
-
-  // Commit storage changes after Chrome accepts the DNR update.
-  await setState({
-    [STORAGE_KEYS.MAP]: idMap,
-    [STORAGE_KEYS.NEXT_DNR_ID]: state[STORAGE_KEYS.NEXT_DNR_ID],
-    [STORAGE_KEYS.RULE_STATUSES]: statuses
-  });
-  await syncPwBotAccessor({
-    ...state,
-    [STORAGE_KEYS.MAP]: idMap,
-    [STORAGE_KEYS.RULE_STATUSES]: statuses
-  });
+  notifyRuleStatuses();
 }
 
 // Listen to rule matches for logging when the debug API is available.
@@ -774,12 +833,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       }
 
       if (msg && msg.type === "get-state") {
-      let state = await getState();
+      const state = await getState();
       const rules = state[STORAGE_KEYS.RULES] || [];
       const ruleStatuses = state[STORAGE_KEYS.RULE_STATUSES] || {};
       if (rules.length && Object.keys(ruleStatuses).length === 0) {
-        await rebuildDnrRules();
-        state = await getState();
+        scheduleRuleApplication();
       }
       sendResponse({
         rules: (state[STORAGE_KEYS.RULES] || []).map(normalizeRuleForClient),
@@ -915,57 +973,61 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     }
 
     if (msg && msg.type === "save-rule") {
-      const state = await getState();
-      const current = state[STORAGE_KEYS.RULES] || [];
-      const categories = normalizeCategories(state[STORAGE_KEYS.CATEGORIES]);
-      const r = msg.rule;
-      if (r) {
-        for (const field of ["name", "source", "destination"]) {
-          r[field] = typeof r[field] === "string" ? r[field].trim() : "";
+      await withRuleStorage(async () => {
+        const state = await getState();
+        const current = state[STORAGE_KEYS.RULES] || [];
+        const categories = normalizeCategories(state[STORAGE_KEYS.CATEGORIES]);
+        const r = msg.rule;
+        if (r) {
+          for (const field of ["name", "source", "destination"]) {
+            r[field] = typeof r[field] === "string" ? r[field].trim() : "";
+          }
         }
-      }
-      // Basic validation
-      if (!r || !r.name || !r.source || !r.destination) {
-        sendResponse({ ok: false, error: "Missing fields" });
-        return;
-      }
-      if (r.name.length > 80) {
-        sendResponse({ ok: false, error: "Name exceeds 80 characters" });
-        return;
-      }
-      if (!["exact", "wildcard", "contain", "domain"].includes(r.mode)) r.mode = "exact";
-      const sourceError = getSourceValidationError(r.source, r.mode);
-      if (sourceError) {
-        sendResponse({ ok: false, error: sourceError });
-        return;
-      }
-      const destinationError = getDestinationValidationError(r.destination, r.mode);
-      if (destinationError) {
-        sendResponse({ ok: false, error: destinationError });
-        return;
-      }
-      if (typeof r.enabled !== "boolean") r.enabled = true;
-      delete r.disablePwBotDetection;
-      r.categoryId = getCategoryId(r.categoryId, categories);
+        // Basic validation
+        if (!r || !r.name || !r.source || !r.destination) {
+          sendResponse({ ok: false, error: "Missing fields" });
+          return;
+        }
+        if (r.name.length > 80) {
+          sendResponse({ ok: false, error: "Name exceeds 80 characters" });
+          return;
+        }
+        if (!["exact", "wildcard", "contain", "domain"].includes(r.mode)) r.mode = "exact";
+        const sourceError = getSourceValidationError(r.source, r.mode);
+        if (sourceError) {
+          sendResponse({ ok: false, error: sourceError });
+          return;
+        }
+        const destinationError = getDestinationValidationError(r.destination, r.mode);
+        if (destinationError) {
+          sendResponse({ ok: false, error: destinationError });
+          return;
+        }
+        if (typeof r.enabled !== "boolean") r.enabled = true;
+        delete r.disablePwBotDetection;
+        r.categoryId = getCategoryId(r.categoryId, categories);
 
-      const rules = current.slice();
-      if (r.id) {
-        const idx = rules.findIndex(x => x.id === r.id);
-        if (idx >= 0) rules[idx] = r;
-        else rules.push(r);
-      } else {
-        r.id = crypto.randomUUID();
-        rules.push(r);
-      }
-      const prev = current.slice();
-      try {
-        await setState({ [STORAGE_KEYS.RULES]: rules });
-        await rebuildDnrRules();
-        sendResponse({ ok: true, rule: r });
-      } catch (e) {
-        await setState({ [STORAGE_KEYS.RULES]: prev });
-        sendResponse({ ok: false, error: e && e.message ? e.message : String(e) });
-      }
+        const rules = current.slice();
+        if (r.id) {
+          const idx = rules.findIndex(x => x.id === r.id);
+          if (idx >= 0) rules[idx] = r;
+          else rules.unshift(r);
+        } else {
+          r.id = crypto.randomUUID();
+          rules.unshift(r);
+        }
+        try {
+          const status = { ...makeRuleStatus(true, "Saved · queued"), phase: "queued", operationId: crypto.randomUUID() };
+          await setState({
+            [STORAGE_KEYS.RULES]: rules,
+            [STORAGE_KEYS.RULE_STATUSES]: { ...state[STORAGE_KEYS.RULE_STATUSES], [r.id]: status }
+          });
+          sendResponse({ ok: true, rule: r, status });
+          scheduleRuleApplication();
+        } catch (e) {
+          sendResponse({ ok: false, error: e && e.message ? e.message : String(e) });
+        }
+      });
       return;
     }
 
@@ -977,17 +1039,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       const idx = rules.findIndex(x => x.id === msg.id);
       if (idx >= 0) {
         const removed = rules.splice(idx, 1)[0];
-        // remove from DNR too
-        const dnrId = idMap[removed.id];
-        if (dnrId) {
-          await chrome.declarativeNetRequest.updateDynamicRules({
-            removeRuleIds: [dnrId],
-            addRules: []
-          });
-          delete idMap[removed.id];
-        }
+        // Queue removal behind any application already in flight.
+        delete idMap[removed.id];
         delete ruleStatuses[removed.id];
         await setState({ [STORAGE_KEYS.RULES]: rules, [STORAGE_KEYS.MAP]: idMap, [STORAGE_KEYS.RULE_STATUSES]: ruleStatuses });
+        await rebuildDnrRules();
         sendResponse({ ok: true });
         return;
       }
@@ -1205,6 +1261,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
 async function initializeExtension() {
   await rebuildDnrRules();
+  await syncPwBotAccessor();
   await updateAllActionStates();
 }
 
@@ -1212,3 +1269,8 @@ async function initializeExtension() {
 chrome.runtime.onInstalled.addListener(() => initializeExtension());
 chrome.runtime.onStartup.addListener(() => initializeExtension());
 updateAllActionStates().catch(() => {});
+// Resume persisted work if Chrome stopped the worker between saving and applying.
+getState().then(state => {
+  if (Object.values(state[STORAGE_KEYS.RULE_STATUSES]).some(status =>
+    status.phase === "queued" || status.phase === "applying")) scheduleRuleApplication();
+}).catch(console.error);

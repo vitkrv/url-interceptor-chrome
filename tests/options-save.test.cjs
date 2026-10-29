@@ -40,7 +40,7 @@ function setup() {
   return { el, pending, runtime, submit, tick };
 }
 
-test('rapid submissions create one request, trim fields, and stay locked until refreshed', async () => {
+test('rapid submissions create one request and unlock as soon as persistence succeeds', async () => {
   const { el, pending, submit, tick } = setup();
   const saving = submit();
   await submit();
@@ -61,8 +61,8 @@ test('rapid submissions create one request, trim fields, and stay locked until r
   pending[0].callback({ ok: true, rule: { ...rule, id: 'new-rule' } });
   await tick();
   assert.equal(pending[1].message.type, 'get-state');
-  assert.equal(el('btnSaveRule').disabled, true);
-  await submit();
+  assert.equal(el('btnSaveRule').disabled, false);
+  assert.equal(el('ruleModal').open, false);
   assert.equal(pending.length, 2);
   pending[1].callback({ rules: [{ ...rule, id: 'new-rule' }], categories: [] });
   await saving;
@@ -119,30 +119,24 @@ test('invalid trimmed input shows field errors and a notification without sendin
   assert.equal(el('btnSaveRule').disabled, false);
 });
 
-test('refresh failure preserves the saved ID so retry updates instead of duplicating', async () => {
-  const { el, pending, submit, tick } = setup();
+test('an unanswered refresh does not hold the saved rule dialog open', async () => {
+  const { el, pending, submit } = setup();
   const saving = submit();
-  pending[0].callback({ ok: true, rule: { id: 'saved-rule' } });
-  await tick();
-  pending[1].callback({ ok: false, error: 'Storage unavailable' });
+  pending[0].callback({ ok: true, rule: { id: 'saved-rule' }, status: { ok: true, phase: 'queued', message: 'Saved · queued' } });
   await saving;
-  assert.equal(el('ruleModal').open, true);
-  assert.match(el('ruleNotification').textContent, /^Rule saved, but the list could not be refreshed: Storage unavailable/);
-  const retry = submit();
-  assert.equal(pending[2].message.rule.id, 'saved-rule');
-  pending[2].callback({ ok: false, error: 'Storage unavailable' });
-  await retry;
+  assert.equal(el('ruleModal').open, false);
+  assert.equal(el('btnSaveRule').disabled, false);
+  assert.equal(el('ruleId').value, 'saved-rule');
+  assert.equal(pending[1].message.type, 'get-state');
 });
 
-test('saved rules that fail activation show the reason and retain their ID', async () => {
+test('application failure does not reopen the saved dialog', async () => {
   const { el, pending, submit, tick } = setup();
   const saving = submit();
   pending[0].callback({ ok: true, rule: { id: 'saved-rule' } });
-  await tick();
-  pending[1].callback({ ruleStatuses: { 'saved-rule': { ok: false, message: 'Unsupported regex' } } });
   await saving;
-  assert.equal(el('ruleModal').open, true);
-  assert.equal(el('ruleId').value, 'saved-rule');
-  assert.match(el('ruleNotification').textContent, /Rule saved, but could not be activated: Unsupported regex/);
+  pending[1].callback({ ruleStatuses: { 'saved-rule': { ok: false, message: 'Unsupported regex' } } });
+  await tick();
+  assert.equal(el('ruleModal').open, false);
   assert.equal(el('btnSaveRule').disabled, false);
 });

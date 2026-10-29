@@ -18,10 +18,9 @@
           <span>Rules • Redirects • Logs</span>
         </div>
       </div>
-      <div class="header-notice-slot" role="status"><div id="pausedNotice" hidden>Redirects are paused. Independently enabled overrides remain active.</div></div>
       <div class="header-state"><div id="overrideIndicators"></div><label class="redirect-control">Redirects<span class="switch"><input type="checkbox" id="globalToggle" aria-label="Enable redirects"><span class="slider"></span></span></label></div>
     </header>
-    <nav class="navigation" aria-label="Main navigation"><a href="#rules">Rules</a><a href="#logs">Logs</a><a href="#settings">Settings</a></nav>
+    <nav class="navigation" aria-label="Main navigation"><a href="#rules">Rules</a><a href="#logs">Logs</a><a href="#settings">Settings</a><div id="pausedNotice" role="status" hidden>Redirects are paused. Independently enabled overrides remain active.</div></nav>
     <div id="loadError" class="load-error" role="alert" hidden><span></span><button id="retryLoad" class="btn outlined">Retry</button></div>
     <main>
     <section id="rulesView" class="view container">

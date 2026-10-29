@@ -22,6 +22,24 @@ function setup(){
   vm.runInContext(fs.readFileSync('options/workspace.js','utf8'),context);
   return {context,el,messages,setResponse:r=>response=r,run:code=>vm.runInContext(code,context)};
 }
+
+test('rule tags report queued, applying, applied and failed operations, including disabled rules',async()=>{
+  const app=setup(); await new Promise(setImmediate);
+  app.run("rules=[{id:'status-rule',enabled:false}]");
+  for (const [status,label,color] of [
+    [{ok:true,phase:'queued',message:'Saved · queued'},'Saved · queued','cyan'],
+    [{ok:true,phase:'applying',message:'Applying…'},'Applying…','cyan'],
+    [{ok:true,message:'Installed'},'Applied','ok'],
+    [{ok:false,phase:'failed',message:'Apply failed: quota exceeded'},'Apply failed','error'],
+    [{ok:true,message:'Disabled'},'Disabled','gray']
+  ]) {
+    app.run('ruleStatuses={"status-rule":'+JSON.stringify(status)+'}');
+    const badge=app.run('statusBadge(rules[0])');
+    assert.equal(badge.textContent,label);
+    assert.ok(badge.className.includes(color));
+    if(!status.ok) assert.match(badge.title,/quota exceeded/);
+  }
+});
 test('workspace initializes with all rules and renders all three view infrastructure without missing bindings',async()=>{
  const app=setup();await new Promise(setImmediate);assert.equal(app.run('selectedCategoryId'), '__all__');assert.equal(app.el('rulesTitle').textContent,'All rules');
 });
